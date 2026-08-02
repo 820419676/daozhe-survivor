@@ -1,0 +1,16 @@
+# Cocos Creator 自动生成的目录
+library/
+temp/
+local/
+profiles/
+
+# 第三方依赖
+node_modules/
+
+# 构建产物
+build/
+
+# 编辑器本地状态
+.cocos/
+node_modules/
+.tscheck/

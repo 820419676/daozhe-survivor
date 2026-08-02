@@ -1,0 +1,11 @@
+{
+  "name": "daozhe-survivor",
+  "version": "0.1.0",
+  "description": "问道幸存者 - 修仙割草微信小游戏",
+  "creator": {
+    "version": "3.8.0"
+  },
+  "dependencies": {
+    "typescript": "5.4"
+  }
+}

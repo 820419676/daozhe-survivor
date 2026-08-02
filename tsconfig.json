@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    /* 语言特性 */
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "lib": ["ES2020"],
+
+    /* 严格模式 */
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "forceConsistentCasingInFileNames": true,
+
+    /* Cocos Creator 装饰器支持 */
+    "experimentalDecorators": true,
+    "useDefineForClassFields": true,
+
+    /* 其它 */
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "baseUrl": "."
+  },
+  "include": ["assets/scripts/**/*"]
+}
