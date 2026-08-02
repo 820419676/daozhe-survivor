@@ -22,10 +22,11 @@ import { _decorator, Component, Node, Label, Graphics, UITransform, Color, Vec3,
 import { find } from 'cc';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
-import { GameManager } from '../core/GameManager';
+import { GameManager, GameState } from '../core/GameManager';
 import { PauseReason } from '../core/PauseReason';
 import { hexColor, makeButton, makeLabel, makePanel } from '../core/UIUtils';
 import { PlayerData } from '../player/PlayerData';
+import { WEAPON_CONFIGS } from '../combat/WeaponData';
 import { WenxinManager } from '../wenxin/WenxinManager';
 import { WenxinResult } from '../wenxin/WenxinData';
 import { PlayerController } from '../player/PlayerController';
@@ -37,14 +38,14 @@ const { ccclass } = _decorator;
 //   GameEvent.PLAYER_XP    —— 玩家经验变化（PlayerController 广播，当前运行时经验主路径）
 //   GameEvent.GOLD_PICKED  —— 灵石拾取（PlayerController 广播，金币刷新）
 
-/** 武器图标配色（按武器 id 区分颜色；超武统一金色，见刷新逻辑） */
+/** 武器图标配色（combat/WeaponData 武器 id；超武统一金色，见刷新逻辑） */
 const WEAPON_ICON_COLORS: Record<string, string> = {
-    lingjian_feidao: '#5C9EFF',   // 灵签飞刀 · 蓝
-    yinyang_lingshi: '#8E7CFF',   // 阴阳灵石 · 紫
-    bagua_zhuanlun: '#FFB74D',    // 八卦转轮 · 橙
-    fazhi_fulu: '#4FC3F7',        // 法旨符箓 · 天蓝
-    tiangang_tanzhu: '#81C784',   // 天罡弹珠 · 绿
-    lingshi_yu: '#F06292',        // 灵石雨 · 粉
+    sword_array: '#5C9EFF',       // 太极剑阵 · 蓝
+    thunder_talisman: '#8E7CFF',  // 雷霆符 · 紫
+    ice_palm: '#4FC3F7',          // 寒冰掌 · 天蓝
+    flame_ring: '#FFB74D',        // 烈焰环 · 橙
+    flying_sword: '#81C784',      // 飞剑术 · 绿
+    sword_storm: '#F06292',       // 万剑诀 · 粉
 };
 /** 超武（进化武器）统一金色 */
 const COLOR_EVOLVED = '#FFD700';
@@ -153,10 +154,15 @@ export class HUD extends Component {
         bus.on(GameEvent.SECOND_TICK, this.onSecondTick, this);
         bus.on(GameEvent.PLAYER_LEVEL_UP, this.onLevelUp, this);
         bus.on(GameEvent.XP_COLLECTED, this.onXpCollected, this);
+        // 迁移期双拼：PlayerController / Enemy 目前仍发大写字符串（'PLAYER_XP' 等），
+        // 统一为枚举小写值后下方兼容订阅可删除（同一事件只会由其中一个写法发出）
         bus.on(GameEvent.PLAYER_XP, this.onPlayerXp, this);
+        bus.on('PLAYER_XP', this.onPlayerXp, this);
         bus.on(GameEvent.WENXIN_RESULT, this.onWenxinResult, this);
         bus.on(GameEvent.ENEMY_KILLED, this.onEnemyKilled, this);
+        bus.on('ENEMY_KILLED', this.onEnemyKilled, this);
         bus.on(GameEvent.GOLD_PICKED, this.onGoldPicked, this);
+        bus.on('GOLD_PICKED', this.onGoldPicked, this);
         bus.on(GameEvent.WEAPON_ADDED, this.onWeaponChanged, this);
         bus.on(GameEvent.WEAPON_UPGRADED, this.onWeaponChanged, this);
         bus.on(GameEvent.WEAPON_EVOLVED, this.onWeaponChanged, this);
@@ -169,9 +175,12 @@ export class HUD extends Component {
         bus.off(GameEvent.PLAYER_LEVEL_UP, this.onLevelUp, this);
         bus.off(GameEvent.XP_COLLECTED, this.onXpCollected, this);
         bus.off(GameEvent.PLAYER_XP, this.onPlayerXp, this);
+        bus.off('PLAYER_XP', this.onPlayerXp, this);
         bus.off(GameEvent.WENXIN_RESULT, this.onWenxinResult, this);
         bus.off(GameEvent.ENEMY_KILLED, this.onEnemyKilled, this);
+        bus.off('ENEMY_KILLED', this.onEnemyKilled, this);
         bus.off(GameEvent.GOLD_PICKED, this.onGoldPicked, this);
+        bus.off('GOLD_PICKED', this.onGoldPicked, this);
         bus.off(GameEvent.WEAPON_ADDED, this.onWeaponChanged, this);
         bus.off(GameEvent.WEAPON_UPGRADED, this.onWeaponChanged, this);
         bus.off(GameEvent.WEAPON_EVOLVED, this.onWeaponChanged, this);
@@ -322,7 +331,10 @@ export class HUD extends Component {
             if (!slot) continue;
             if (i < weapons.length) {
                 const w = weapons[i];
-                const color = w.evolved ? COLOR_EVOLVED : (WEAPON_ICON_COLORS[w.id] ?? COLOR_UNKNOWN);
+                // 超武判定：combat/WeaponData 中 evolutionId 为空串 = 最终形态（已进化）
+                const cfg = WEAPON_CONFIGS[w.id];
+                const isEvolved = !!cfg && cfg.evolutionId === '';
+                const color = isEvolved ? COLOR_EVOLVED : (WEAPON_ICON_COLORS[w.id] ?? COLOR_UNKNOWN);
                 this.paintSlot(slot, color, true, String(w.level));
             } else {
                 this.paintSlot(slot, '#333333', false, '');
@@ -358,7 +370,7 @@ export class HUD extends Component {
 
     private togglePause() {
         const gm = GameManager.getInstance();
-        if (!gm) return;
+        if (!gm || gm.state === GameState.GAME_OVER) return; // 结算中不响应暂停
         if (gm.isPaused(PauseReason.SETTINGS)) {
             gm.requestResume(PauseReason.SETTINGS);
             if (this.pauseBtnLabel) this.pauseBtnLabel.string = '暂停';

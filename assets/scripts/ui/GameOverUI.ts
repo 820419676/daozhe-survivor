@@ -20,7 +20,7 @@
 import { _decorator, Component, Node, Label, Color, view, tween, Tween, UIOpacity, Button, find } from 'cc';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
-import { GameManager } from '../core/GameManager';
+import { GameManager, GameState } from '../core/GameManager';
 import { PauseReason } from '../core/PauseReason';
 import { hexColor, makeButton, makeLabel, makePanel } from '../core/UIUtils';
 import { WenxinResult } from '../wenxin/WenxinData';
@@ -180,9 +180,11 @@ export class GameOverUI extends Component {
         this.shown = true;
         this.lastResults = results;
 
-        // 结算期间完全暂停游戏
+        // 结算期间完全暂停游戏（若已处于 GAME_OVER 冻结态则无需再暂停）
         const gm = GameManager.getInstance();
-        if (gm) gm.requestPause(PauseReason.SETTINGS);
+        if (gm && (gm.state === GameState.PLAYING || gm.state === GameState.PAUSED)) {
+            gm.requestPause(PauseReason.SETTINGS);
+        }
 
         // 填充统计行
         const values = [
@@ -208,7 +210,7 @@ export class GameOverUI extends Component {
         this.shown = false;
         this.node.active = false;
         const gm = GameManager.getInstance();
-        if (gm) gm.requestResume(PauseReason.SETTINGS);
+        if (gm && gm.isPaused(PauseReason.SETTINGS)) gm.requestResume(PauseReason.SETTINGS);
     }
 
     // ============================================================
@@ -235,14 +237,22 @@ export class GameOverUI extends Component {
         this.setBusyText(this.reviveBtnLabel, '复活中…');
 
         const gm = GameManager.getInstance();
-        if (gm) gm.requestPause(PauseReason.AD); // 广告期间暂停
+        // 广告期间暂停（GAME_OVER 冻结态下 requestPause 会拒绝并告警，需先判状态）
+        const canPause = !!gm && (gm.state === GameState.PLAYING || gm.state === GameState.PAUSED);
+        if (canPause) gm!.requestPause(PauseReason.AD);
 
         WxManager.getInstance().showRewardedAd(AD_REVIVE_ID).then((ok) => {
-            if (gm) gm.requestResume(PauseReason.AD);
+            if (canPause) gm!.requestResume(PauseReason.AD);
             this.busy = false;
             this.setBusyText(this.reviveBtnLabel, '复活');
 
             if (ok) {
+                // 恢复运行态并回拨 30 秒（续命时长）：结算若由超时/结束触发，
+                // 状态机停在 GAME_OVER，必须显式恢复 PLAYING 才可继续
+                if (gm) {
+                    gm.state = GameState.PLAYING;
+                    gm.elapsedTime = Math.max(0, gm.elapsedTime - REVIVE_GRACE_SECONDS);
+                }
                 // 广播复活事件：玩家系统监听后恢复控制，并给予 30 秒续命
                 EventBus.getInstance().emit(GameEvent.PLAYER_REVIVED, { graceSeconds: REVIVE_GRACE_SECONDS });
                 this.reviveUsed = true;
