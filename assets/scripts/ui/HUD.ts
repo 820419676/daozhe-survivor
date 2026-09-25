@@ -18,7 +18,7 @@
 //     通过 GOLD_PICKED 事件刷新
 // ============================================================
 
-import { _decorator, Component, Node, Label, Graphics, UITransform, Color, Vec3, view, Button } from 'cc';
+import { _decorator, Component, Node, Label, Graphics, UITransform, Color, Vec3, view, Button, tween, Tween } from 'cc';
 import { find } from 'cc';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
@@ -60,16 +60,41 @@ const PASSIVE_ICON_COLORS: Record<string, string> = {
     yandou: '#A1887F',    // 烟斗 · 棕
 };
 
+/** 武器中文单字（验收：剑/雷/冰/火 等，武器格不再用纯色方块） */
+const WEAPON_SYMBOLS: Record<string, string> = {
+    sword_array: '剑',              // 太极剑阵
+    eight_trigrams: '阵',           // 八阵剑图
+    thunder_talisman: '雷',         // 雷霆符
+    nine_heaven_thunder: '霄',      // 九霄神雷
+    ice_palm: '冰',                 // 寒冰掌
+    absolute_zero: '零',            // 绝对零度
+    flame_ring: '火',               // 烈焰环
+    phoenix_rebirth: '凤',          // 凤火涅槃
+    flying_sword: '术',             // 飞剑术
+    thousand_swords: '千',          // 千剑诀
+    sword_storm: '雨',              // 万剑诀
+    celestial_sword_rain: '幕',     // 天剑雨幕
+};
+
+/** 被动中文单字 */
+const PASSIVE_SYMBOLS: Record<string, string> = {
+    taoist_nature: '法',   // 道法自然
+    spirit_guard: '护',    // 灵气护体
+    heavenly_secret: '机', // 天机推演
+    spirit_bone: '骨',     // 仙骨丹
+};
+
 /** 武器 / 被动图标槽位上限 */
 const MAX_WEAPON_SLOTS = 6;
 const MAX_PASSIVE_SLOTS = 4;
 
-/** 单个图标槽位视图（方块 + 等级文字） */
+/** 单个图标槽位视图（圆角格 + 中文单字 + 右下角 Lv.N） */
 interface SlotView {
     root: Node;
     gfx: Graphics;
     symbol: Label;
     level: Label;
+    lastKey: string; // 上次显示的 武器id:等级，变化时播放一次缩放动画
 }
 
 /** 秒数 → MM:SS */
@@ -336,9 +361,10 @@ export class HUD extends Component {
                 const cfg = WEAPON_CONFIGS[w.id];
                 const isEvolved = !!cfg && cfg.evolutionId === '';
                 const color = isEvolved ? COLOR_EVOLVED : (WEAPON_ICON_COLORS[w.id] ?? COLOR_UNKNOWN);
-                this.paintSlot(slot, color, true, w.name.charAt(0), String(w.level));
+                const symbol = WEAPON_SYMBOLS[w.id] ?? (cfg ? cfg.name.charAt(0) : '?');
+                this.paintSlot(slot, color, true, symbol, `Lv.${w.level}`, `${w.id}:${w.level}`);
             } else {
-                this.paintSlot(slot, '#333333', false, '', '');
+                this.paintSlot(slot, '#1B1D26', false, '', '', 'empty');
             }
         }
 
@@ -347,23 +373,58 @@ export class HUD extends Component {
             if (!slot) continue;
             if (i < passives.length) {
                 const p = passives[i];
-                this.paintSlot(slot, PASSIVE_ICON_COLORS[p.id] ?? COLOR_UNKNOWN, true, '诀', String(p.level));
+                this.paintSlot(
+                    slot,
+                    PASSIVE_ICON_COLORS[p.id] ?? COLOR_UNKNOWN,
+                    true,
+                    PASSIVE_SYMBOLS[p.id] ?? '诀',
+                    `Lv.${p.level}`,
+                    `${p.id}:${p.level}`,
+                );
             } else {
-                this.paintSlot(slot, '#333333', false, '', '');
+                this.paintSlot(slot, '#1B1D26', false, '', '', 'empty');
             }
         }
     }
 
-    private paintSlot(slot: SlotView, colorHex: string, active: boolean, symbolText: string, levelText: string) {
-        slot.root.active = active;
-        if (!active) return;
+    /**
+     * 绘制一个槽位：
+     *   active   → 底色 + 白描边 + 中文单字 + 右下角 Lv.N；
+     *   空槽     → 半透明深色格子（保持可见）；
+     *   key 变化 → 播放一次 0.2s 缩放动画（获得/升级反馈）。
+     */
+    private paintSlot(slot: SlotView, colorHex: string, active: boolean, symbolText: string, levelText: string, key: string) {
         const g = slot.gfx;
         g.clear();
-        g.fillColor = hexColor(colorHex);
-        g.roundRect(-17, -17, 34, 34, 6);
-        g.fill();
+        if (active) {
+            g.fillColor = hexColor(colorHex);
+            g.roundRect(-20, -20, 40, 40, 7);
+            g.fill();
+            g.lineWidth = 2;
+            g.strokeColor = hexColor('#FFFFFF', 70);
+            g.roundRect(-20, -20, 40, 40, 7);
+            g.stroke();
+        } else {
+            // 空槽：半透明深色格子
+            g.fillColor = hexColor(colorHex, 110);
+            g.roundRect(-20, -20, 40, 40, 7);
+            g.fill();
+        }
         slot.symbol.string = symbolText;
         slot.level.string = levelText;
+
+        // 获得 / 升级：0.2s 缩放动画（弹一下）
+        if (active && slot.lastKey !== key) {
+            slot.lastKey = key;
+            Tween.stopAllByTarget(slot.root);
+            slot.root.setScale(1, 1, 1);
+            tween(slot.root)
+                .to(0.1, { scale: new Vec3(1.28, 1.28, 1) }, { easing: 'quadOut' })
+                .to(0.1, { scale: new Vec3(1, 1, 1) }, { easing: 'quadOut' })
+                .start();
+        } else if (!active) {
+            slot.lastKey = '';
+        }
     }
 
     // ============================================================
@@ -429,17 +490,17 @@ export class HUD extends Component {
         pauseBtn.setPosition(W / 2 - 100, H / 2 - 60, 0);
         this.pauseBtnLabel = pauseBtn.getComponentInChildren(Label);
 
-        // ── 左上角：武器图标（最多 6 个，不同颜色方块） ──
-        const WEAPON_ICON_Y = H / 2 - 130;
+        // ── 左上角：武器图标（最多 6 个，中文单字 + Lv.N） ──
+        const WEAPON_ICON_Y = H / 2 - 126;
         for (let i = 0; i < MAX_WEAPON_SLOTS; i++) {
             const slot = this.createSlot(this.node, '#333333');
             slot.root.name = `WeaponSlot_${i}`;
-            slot.root.setPosition(-W / 2 + 48 + i * 46, WEAPON_ICON_Y, 0);
+            slot.root.setPosition(-W / 2 + 46 + i * 48, WEAPON_ICON_Y, 0);
             this.weaponSlots.push(slot);
         }
 
         // ── 武器图标下方：被动图标（最多 4 个） ──
-        const PASSIVE_ICON_Y = H / 2 - 195;
+        const PASSIVE_ICON_Y = H / 2 - 188;
         for (let i = 0; i < MAX_PASSIVE_SLOTS; i++) {
             const slot = this.createSlot(this.node, '#333333');
             slot.root.name = `PassiveSlot_${i}`;
@@ -463,18 +524,18 @@ export class HUD extends Component {
         this.pauseOverlay.active = false;
     }
 
-    /** 创建一个图标槽位（方块 + 右下角等级文字） */
+    /** 创建一个图标槽位（40×40 圆角格 + 中文单字 + 右下角 Lv.N） */
     private createSlot(parent: Node, colorHex: string): SlotView {
-        const root = makePanel(parent, 34, 34, hexColor(colorHex), 6);
+        const root = makePanel(parent, 40, 40, hexColor(colorHex), 7);
         const gfx = root.getComponent(Graphics)!;
-        const symbol = makeLabel(root, '', 18, '#102018', 24, 24);
-        symbol.node.setPosition(-2, 1, 0);
+        const symbol = makeLabel(root, '', 20, '#FFFFFF', 30, 30);
+        symbol.node.setPosition(-1, 3, 0);
         symbol.horizontalAlign = Label.HorizontalAlign.CENTER;
         symbol.verticalAlign = Label.VerticalAlign.CENTER;
-        const level = makeLabel(root, '', 12, '#FFFFFF', 22, 18);
-        level.node.setPosition(9, -9, 0);
+        const level = makeLabel(root, '', 11, '#E8F4FF', 34, 16);
+        level.node.setPosition(11, -11, 0);
         level.horizontalAlign = Label.HorizontalAlign.RIGHT;
         level.verticalAlign = Label.VerticalAlign.BOTTOM;
-        return { root, gfx, symbol, level };
+        return { root, gfx, symbol, level, lastKey: '' };
     }
 }

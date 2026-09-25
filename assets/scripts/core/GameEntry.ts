@@ -3,10 +3,10 @@
  */
 import {
     _decorator, BoxCollider2D, Color, Component, find, Graphics,
-    Label, Node, Size, UITransform, view, log, warn,
+    Label, Node, Size, UITransform, view, log, warn, UIOpacity, tween,
 } from 'cc';
 import { EventBus } from './EventBus';
-import { GameManager } from './GameManager';
+import { GameManager, GameMode } from './GameManager';
 import { GAME_CONFIG } from './GameConfig';
 import { WenxinManager } from '../wenxin/WenxinManager';
 import { PlayerController } from '../player/PlayerController';
@@ -19,6 +19,7 @@ import { GameOverUI } from '../ui/GameOverUI';
 import { WenxinUI } from '../wenxin/WenxinUI';
 import { LevelUpUI } from '../progression/LevelUpUI';
 import { PickupSystem } from '../progression/PickupSystem';
+import { DebugPanel } from '../ui/DebugPanel';
 
 const { ccclass } = _decorator;
 
@@ -87,23 +88,45 @@ export class GameEntry extends Component {
         if (!player.getComponent(UITransform)) player.addComponent(UITransform).setContentSize(48, 48);
         if (!player.getComponent(Graphics)) {
             const graphics = player.addComponent(Graphics);
+            // 外层光晕（柔化轮廓）
+            graphics.fillColor = new Color(94, 234, 212, 60);
+            graphics.circle(0, 0, 30);
+            graphics.fill();
+            // 主体青绿色圆形
             graphics.fillColor = new Color(94, 234, 212, 255);
             graphics.circle(0, 0, 22);
             graphics.fill();
-            graphics.strokeColor = new Color(255, 255, 255, 220);
+            // 白色描边
+            graphics.strokeColor = new Color(255, 255, 255, 230);
             graphics.lineWidth = 3;
             graphics.circle(0, 0, 22);
             graphics.stroke();
+            // 发光核心
+            graphics.fillColor = new Color(224, 255, 248, 255);
+            graphics.circle(0, 0, 8);
+            graphics.fill();
         }
         if (!player.getComponent(BoxCollider2D)) {
             const collider = player.addComponent(BoxCollider2D);
             collider.size = new Size(44, 44);
         }
         if (!player.getComponent(PlayerController)) player.addComponent(PlayerController);
+        // 地图边界与 MapManager(2000×2000) 对齐，留 50px 边距
+        const playerCtrl = player.getComponent(PlayerController)!;
+        playerCtrl.mapHalfWidth = 950;
+        playerCtrl.mapHalfHeight = 950;
         if (!player.getComponent(WeaponSystem)) player.addComponent(WeaponSystem);
 
         const spawner = this.ensureChild(canvas, 'EnemySpawner');
-        if (!spawner.getComponent(EnemySpawner)) spawner.addComponent(EnemySpawner);
+        const spawnerComp = spawner.getComponent(EnemySpawner) ?? spawner.addComponent(EnemySpawner);
+        // MVP 数值接线：同屏上限 60 / 地图边界与玩家一致 /
+        // 2 分钟测试模式（无终局 Boss，精英提前到 60 秒）
+        const testMode = GAME_CONFIG.debug.test2Minute;
+        spawnerComp.maxEnemies = GAME_CONFIG.screen.maxEnemies;
+        spawnerComp.gameEndTime = testMode ? GameMode.TEST_2MIN : GameMode.TRIAL_15;
+        spawnerComp.mapHalfWidth = 950;
+        spawnerComp.mapHalfHeight = 950;
+        spawnerComp.eliteInterval = testMode ? 60 : 120;
 
         const pickups = this.ensureChild(canvas, 'Pickups');
         if (!pickups.getComponent(PickupSystem)) pickups.addComponent(PickupSystem);
@@ -115,6 +138,10 @@ export class GameEntry extends Component {
         this.ensureComponent(uiRoot, 'WenxinUI', WenxinUI);
         this.ensureComponent(uiRoot, 'LevelUpUI', LevelUpUI);
         this.ensureComponent(uiRoot, 'GameOverUI', GameOverUI);
+        // 可玩状态调试面板（仅开发环境；GAME_CONFIG.debug.debugUi / DEBUG_UI 常量关闭）
+        if (GAME_CONFIG.debug.debugUi) {
+            this.ensureComponent(uiRoot, 'DebugPanel', DebugPanel);
+        }
         this.showPlayHint(canvas);
     }
 
@@ -170,15 +197,26 @@ export class GameEntry extends Component {
         if (!node) {
             node = new Node('MvpPlayHint');
             node.setParent(canvas);
-            node.addComponent(UITransform).setContentSize(720, 42);
+            node.addComponent(UITransform).setContentSize(760, 44);
             node.addComponent(Label);
         }
         const label = node.getComponent(Label)!;
-        label.string = '拖拽移动 · 环绕飞剑自动斩妖 · 拾取蓝色灵珠升级';
+        label.string = '拖拽移动 · 飞剑自动斩妖 · 拾取蓝色灵珠升级';
         label.fontSize = 20;
         label.lineHeight = 30;
-        label.color = new Color(210, 232, 240, 230);
+        label.color = new Color(210, 232, 240, 235);
         const size = view.getVisibleSize();
-        node.setPosition(0, size.height / 2 - 95, 0);
+        // 顶部 HUD 下方
+        node.setPosition(0, size.height / 2 - 118, 0);
+        // 首局引导：显示 8 秒后淡出
+        const op = node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
+        op.opacity = 255;
+        tween(op)
+            .delay(8)
+            .to(1.0, { opacity: 0 })
+            .call(() => {
+                if (node.isValid) node.active = false;
+            })
+            .start();
     }
 }

@@ -108,7 +108,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
         xpDrop: 5,       // 紫宝石 = 5 点经验
         goldDrop: 25,
         size: 60,
-        color: new Color(196, 62, 62), // 猩红
+        color: new Color(255, 112, 40), // 橙红（六边形精英，验收视觉）
         canShoot: false, // 技能系统后续接入：冲锋 / 放射弹 / 召唤杂鱼
         shootInterval: 0,
         isBoss: false,

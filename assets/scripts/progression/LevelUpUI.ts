@@ -50,7 +50,7 @@ type StatKind = 'might' | 'speed' | 'area' | 'luck';
 
 /** 单个升级选项 */
 interface LevelUpOption {
-    type: 'new_weapon' | 'weapon_up' | 'passive_up' | 'stat_pack';
+    type: 'new_weapon' | 'weapon_up' | 'new_passive' | 'passive_up' | 'stat_pack';
     weaponId?: string;
     passiveId?: string;
     statKind?: StatKind;
@@ -226,7 +226,7 @@ export class LevelUpUI extends Component {
             weighted.push({ opt, weight: 1 });
         }
 
-        // 3) 被动升级（未满级）
+        // 3) 已有被动升级（未满级）
         for (const slot of pd.passives) {
             const cfg = PASSIVE_CONFIGS[slot.id];
             if (!cfg || slot.level >= MAX_PASSIVE_LEVEL) continue;
@@ -237,6 +237,19 @@ export class LevelUpUI extends Component {
                     desc: cfg.description, rarity: Rarity.NORMAL,
                 },
                 weight: 1,
+            });
+        }
+
+        // 3b) 新被动（未持有）——保证三选一始终包含"获得被动"类目（验收）
+        for (const id of Object.keys(PASSIVE_CONFIGS)) {
+            const cfg = PASSIVE_CONFIGS[id];
+            if (pd.hasPassive(id)) continue;
+            weighted.push({
+                opt: {
+                    type: 'new_passive', passiveId: id,
+                    name: cfg.name, desc: cfg.description, rarity: Rarity.NORMAL,
+                },
+                weight: 1.5,
             });
         }
 
@@ -404,6 +417,10 @@ export class LevelUpUI extends Component {
             }
             case 'passive_up': {
                 pd.upgradePassive(opt.passiveId!);
+                break;
+            }
+            case 'new_passive': {
+                pd.addPassive(opt.passiveId!);
                 break;
             }
             case 'stat_pack': {

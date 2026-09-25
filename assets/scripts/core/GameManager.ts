@@ -46,6 +46,7 @@ export enum GameMode {
     TRIAL_15 = 900, // 15分钟试炼
     DEEP_30 = 1800, // 30分钟深度
     SPEED_10 = 600, // 10分钟极速
+    TEST_2MIN = 120, // 2分钟开发测试（仅开发环境：验证完整循环）
 }
 
 /** 问心减速时间流速（GDD 4.3.2：画面减速至 20%，不暂停割草） */
@@ -125,8 +126,11 @@ export class GameManager extends Component {
         bus.on(GameEvent.ENEMY_KILLED, this.handleEnemyKilled);
         bus.on(GameEvent.WENXIN_RESULT, this.handleWenxinResult);
 
-        // 默认直接开局（试炼模式）
-        this.startGame(GameMode.TRIAL_15);
+        // 默认直接开局：开发环境 2 分钟测试模式（GAME_CONFIG.debug.test2Minute），
+        // 正式版置 false 后恢复 15 分钟试炼
+        this.startGame(
+            GAME_CONFIG.debug.test2Minute ? GameMode.TEST_2MIN : GameMode.TRIAL_15
+        );
     }
 
     onDestroy() {
@@ -193,6 +197,8 @@ export class GameManager extends Component {
 
     /** 检查并触发问心（含与升级弹窗错峰） */
     private checkWenxinTrigger() {
+        // 2 分钟测试模式跳过问心：问心属于第二阶段验证内容（验收要求 90 秒前不触发）
+        if (this.mode === GameMode.TEST_2MIN) return;
         if (this.elapsedTime < this.nextWenxinTime) return;
 
         // 错峰规则：若距上次升级不足8秒（升级弹窗每30~90秒一次），

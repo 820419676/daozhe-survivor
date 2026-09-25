@@ -7,9 +7,12 @@
  *   - 装备槽（6 武器 + 6 被动，同 Vampire Survivors 槽位约束）
  *   - 问心状态（道心值、经验倍率、问心档位、连渡次数）
  *
- * 升级经验曲线：getXpForLevel(lv) = 20 × 1.3^(lv-1)（VS 风格指数曲线，
- * 保证前期升级快、后期升级慢，配合"击杀掉宝石→磁吸拾取→升级"节奏）。
+ * 升级经验曲线：getXpForLevel(lv) = baseRequirement × growthFactor^(lv-1)
+ * （数值收敛在 core/GameConfig.GAME_CONFIG.xp；MVP 调为 10 × 1.2^(lv-1)，
+ * 保证首局 30–45 秒内升到 2 级，配合"击杀掉宝石→磁吸拾取→升级"节奏）。
  */
+
+import { GAME_CONFIG } from '../core/GameConfig';
 
 /** 武器槽位（id 对应武器表，level 为当前等级，满级后可进化超武） */
 export interface WeaponSlot {
@@ -107,9 +110,9 @@ export class PlayerData {
         return 0.05 + this.luck * 0.03;
     }
 
-    /** 磁吸/拾取半径（基础 80 × 范围倍率） */
+    /** 磁吸/拾取半径（基础 110 × 范围倍率；数值收敛在 GameConfig.player.magnetRange） */
     get pickupRange(): number {
-        return 80 * this.area;
+        return GAME_CONFIG.player.magnetRange * this.area;
     }
 
     /** 基础移动速度（200 × 速度倍率） */
@@ -119,11 +122,15 @@ export class PlayerData {
 
     /**
      * 升级经验需求：从 lv 级升到 lv+1 级所需经验。
-     * 曲线：20 × 1.3^(lv-1)。lv=1 需 20 点，lv=5 约 57 点，lv=10 约 206 点。
-     * （小妖掉落 1 点经验宝石，前期约 20 只升 1 级，节奏与 VS 一致）
+     * 曲线：baseRequirement × growthFactor^(lv-1)，数值收敛在 GameConfig.xp。
+     * MVP：lv=1 需 10 点，lv=2 需 12 点，lv=5 约 21 点。
+     * （小妖掉落 1 点经验宝石，首局 30–45 秒内必升 2 级）
      */
     getXpForLevel(lv: number): number {
-        return Math.floor(20 * Math.pow(1.3, Math.max(1, Math.floor(lv)) - 1));
+        return Math.floor(
+            GAME_CONFIG.xp.baseRequirement *
+            Math.pow(GAME_CONFIG.xp.growthFactor, Math.max(1, Math.floor(lv)) - 1)
+        );
     }
 
     /**

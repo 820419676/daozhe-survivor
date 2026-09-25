@@ -16,7 +16,7 @@
 //   - 对象池复用节点（上限 40），动画结束自动回收
 // ============================================================
 
-import { _decorator, Component, Node, Label, UITransform, Vec3, UIOpacity, LabelOutline, tween, Tween } from 'cc';
+import { _decorator, Component, Node, Label, UITransform, Vec3, UIOpacity, LabelOutline, tween, Tween, Graphics } from 'cc';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
 import { hexColor, makeLabel } from '../core/UIUtils';
@@ -57,10 +57,12 @@ export class DamageNumber extends Component {
         DamageNumber._instance = this;
         this.pool.length = 0;
         EventBus.getInstance().on(GameEvent.COMBAT_DAMAGE, this.onCombatDamage, this);
+        EventBus.getInstance().on(GameEvent.ENEMY_KILLED, this.onEnemyKilled, this);
     }
 
     onDestroy() {
         EventBus.getInstance().off(GameEvent.COMBAT_DAMAGE, this.onCombatDamage, this);
+        EventBus.getInstance().off(GameEvent.ENEMY_KILLED, this.onEnemyKilled, this);
         if (DamageNumber._instance === this) {
             DamageNumber._instance = null;
         }
@@ -94,6 +96,39 @@ export class DamageNumber extends Component {
             payload.damage,
             !!payload.isCrit,
         );
+    }
+
+    /** 击杀事件 → 白色扩散圆环（验收：击杀时有短暂白色闪光/圆环） */
+    private onEnemyKilled(payload: { position?: { x: number; y: number } }): void {
+        if (!payload || !payload.position) return;
+        DamageNumber.ring(new Vec3(payload.position.x, payload.position.y, 0));
+    }
+
+    /** 在指定世界坐标生成一个白色扩散圆环（0.3s 后自动销毁） */
+    static ring(position: Vec3): void {
+        const inst = DamageNumber._instance;
+        if (!inst || !inst.isValid) return;
+
+        const node = new Node('KillRing');
+        node.setParent(inst.node);
+        node.addComponent(UITransform).setContentSize(40, 40);
+        const g = node.addComponent(Graphics);
+        g.lineWidth = 3;
+        g.strokeColor = hexColor('#FFFFFF', 220);
+        g.circle(0, 0, 14);
+        g.stroke();
+
+        const local = inst.worldToLocal(position);
+        node.setPosition(local.x, local.y, 0);
+        node.setScale(0.6, 0.6, 1);
+        const op = node.addComponent(UIOpacity);
+        tween(node)
+            .to(0.3, { scale: new Vec3(2.4, 2.4, 1) }, { easing: 'quadOut' })
+            .start();
+        tween(op)
+            .to(0.3, { opacity: 0 })
+            .call(() => node.destroy())
+            .start();
     }
 
     // ============================================================

@@ -26,7 +26,7 @@
 import {
     _decorator, Component, Node, Vec3, Vec2, v3, Sprite, Color,
     Collider2D, UITransform, Prefab, view, warn,
-    EventTouch, Contact2DType, IPhysics2DContact,
+    EventTouch, Contact2DType, IPhysics2DContact, Graphics, Label,
 } from 'cc';
 import { GameManager, GameState } from '../core/GameManager';
 import { EventBus } from '../core/EventBus';
@@ -37,6 +37,7 @@ import { XPSystem } from '../progression/XPSystem';
 import { Enemy } from '../enemy/Enemy';
 import { EnemyType, PhysicsGroups } from '../enemy/EnemyTypes';
 import { WeaponSystem } from '../combat/WeaponSystem';
+import { hexColor } from '../core/UIUtils';
 
 const { ccclass, property } = _decorator;
 
@@ -48,7 +49,7 @@ export class PlayerController extends Component {
 
     /** 磁吸基础半径（px）；实际磁吸半径 = pickupRange = magnetRange × 范围倍率 */
     @property({ tooltip: 'XP宝石磁吸基础半径（px）' })
-    magnetRange: number = 80;
+    magnetRange: number = 150;
 
     /** 每秒自动回复 HP（GDD：每秒自动恢复 1 点） */
     @property({ tooltip: '每秒自动回复 HP' })
@@ -61,13 +62,13 @@ export class PlayerController extends Component {
      */
     public facing: Vec3 = v3(1, 0, 0);
 
-    /** 地图矩形边界（半宽，以世界原点为中心） */
+    /** 地图矩形边界（半宽，以世界原点为中心；与 MapManager 2000×2000 对齐留 50px 边距） */
     @property({ tooltip: '地图半宽（px）' })
-    mapHalfWidth: number = 1800;
+    mapHalfWidth: number = 950;
 
     /** 地图矩形边界（半高） */
     @property({ tooltip: '地图半高（px）' })
-    mapHalfHeight: number = 1800;
+    mapHalfHeight: number = 950;
 
     /**
      * XP 宝石注册表（由拾取物系统维护）：
@@ -93,6 +94,11 @@ export class PlayerController extends Component {
     private collider: Collider2D | null = null;
     private sprite: Sprite | null = null;
     private baseColor: Color | null = null;
+
+    // —— 玩家视觉（Graphics 程序化：方向箭头 / HP 条） ——
+    private arrowNode: Node | null = null;
+    private hpBarGfx: Graphics | null = null;
+    private hpLabel: Label | null = null;
 
     // ==================== 静态注册表 ====================
 
@@ -126,6 +132,7 @@ export class PlayerController extends Component {
         this.initTouch();
         this.initCollision();
         this.initEvents();
+        this.setupPlayerVisuals();
     }
 
     update(dt: number): void {
@@ -137,6 +144,8 @@ export class PlayerController extends Component {
 
     onDestroy(): void {
         EventBus.off(GameEvent.ENEMY_KILLED, this.onEnemyKilled, this);
+        EventBus.off(GameEvent.PLAYER_DAMAGED, this.onPlayerDamaged, this);
+        EventBus.off(GameEvent.PLAYER_HP_CHANGED, this.onPlayerHpChanged, this);
         this.unscheduleAllCallbacks();
     }
 
@@ -199,6 +208,7 @@ export class PlayerController extends Component {
         this.facing = v3(nx, ny, 0);
         const weaponSystem = this.node.getComponent(WeaponSystem);
         if (weaponSystem) weaponSystem.facing = Math.atan2(ny, nx);
+        this.updateArrow();
 
         const moveSpeed = this.speed * this.data.speed; // 基础移速 × 速度倍率
         const step = moveSpeed * dt;
@@ -384,12 +394,80 @@ export class PlayerController extends Component {
 
     private initEvents(): void {
         EventBus.on(GameEvent.ENEMY_KILLED, this.onEnemyKilled, this);
+        EventBus.on(GameEvent.PLAYER_DAMAGED, this.onPlayerDamaged, this);
+        EventBus.on(GameEvent.PLAYER_HP_CHANGED, this.onPlayerHpChanged, this);
     }
 
     /** 击杀妖王（精英）回血 30（GDD 4.2.7） */
     private onEnemyKilled(payload: { type: EnemyType }): void {
         if (payload && payload.type === EnemyType.ELITE) this.heal(30);
     }
+
+    // ==================== 玩家视觉（Graphics 程序化） ====================
+
+    /** 方向箭头 + HP 条（100/100 样式） */
+    private setupPlayerVisuals(): void {
+        // —— 方向箭头（白色小三角，位于圆形上方，指向移动方向） ——
+        this.arrowNode = new Node('PlayerArrow');
+        this.arrowNode.setParent(this.node);
+        this.arrowNode.setPosition(0, 34, 0);
+        const ag = this.arrowNode.addComponent(Graphics);
+        ag.fillColor = Color.WHITE;
+        ag.moveTo(0, 10);
+        ag.lineTo(-8, -5);
+        ag.lineTo(8, -5);
+        ag.close();
+        ag.fill();
+
+        // —— HP 条（玩家下方） ——
+        const bar = new Node('PlayerHpBar');
+        bar.setParent(this.node);
+        bar.setPosition(0, -36, 0);
+        const bg = bar.addComponent(Graphics);
+        bg.fillColor = new Color(16, 16, 26, 220);
+        bg.roundRect(-27, -5, 54, 10, 5);
+        bg.fill();
+        this.hpBarGfx = bar.addComponent(Graphics);
+
+        // —— HP 文本（如 "100 / 100"） ——
+        const hpText = new Node('PlayerHpText');
+        hpText.setParent(this.node);
+        hpText.setPosition(0, -52, 0);
+        hpText.addComponent(UITransform).setContentSize(120, 22);
+        this.hpLabel = hpText.addComponent(Label);
+        this.hpLabel.fontSize = 13;
+        this.hpLabel.lineHeight = 16;
+        this.hpLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+        this.hpLabel.verticalAlign = Label.VerticalAlign.CENTER;
+        this.hpLabel.color = new Color(240, 244, 248, 255);
+
+        this.refreshHpBar();
+    }
+
+    /** 方向箭头指向面朝方向（三角默认朝 +y，旋转到 facing 角） */
+    private updateArrow(): void {
+        if (!this.arrowNode || !this.arrowNode.isValid) return;
+        const deg = (Math.atan2(this.facing.y, this.facing.x) * 180) / Math.PI;
+        this.arrowNode.angle = deg - 90;
+    }
+
+    /** 刷新 HP 条与文本（PLAYER_DAMAGED / PLAYER_HP_CHANGED / 初始化时调用） */
+    private refreshHpBar(): void {
+        const g = this.hpBarGfx;
+        if (!g) return;
+        g.clear();
+        const ratio = Math.max(0, Math.min(1, this.data.hp / Math.max(1, this.data.maxHp)));
+        g.fillColor = ratio > 0.5 ? hexColor('#4CAF50') : ratio > 0.25 ? hexColor('#FFC107') : hexColor('#F44336');
+        g.roundRect(-25, -3, 50 * ratio, 6, 3);
+        g.fill();
+        if (this.hpLabel) {
+            this.hpLabel.string = `${Math.max(0, Math.ceil(this.data.hp))} / ${this.data.maxHp}`;
+        }
+    }
+
+    /** 受击 / 生命变化 → 刷新 HP 条 */
+    private onPlayerDamaged = (): void => { this.refreshHpBar(); };
+    private onPlayerHpChanged = (): void => { this.refreshHpBar(); };
 
     // ==================== 对外访问 ====================
 

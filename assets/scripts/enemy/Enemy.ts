@@ -19,6 +19,7 @@
 import {
     _decorator, Component, Node, Vec3, v3, Sprite, Color,
     Prefab, UITransform, find, warn, instantiate, Graphics,
+    UIOpacity, BoxCollider2D, tween, Tween,
 } from 'cc';
 import { GameManager, GameState } from '../core/GameManager';
 import { EventBus } from '../core/EventBus';
@@ -71,6 +72,10 @@ export class Enemy extends Component {
 
     /** 已回收标记（防重复回收/重复回调） */
     private recycled: boolean = false;
+    /** 死亡演出中（缩小+淡出，期间冻结 AI 与碰撞） */
+    private dying: boolean = false;
+    /** 受击闪白中（Graphics 以白色重绘） */
+    private flashWhite: boolean = false;
     /** 是否 Boss */
     private isBoss: boolean = false;
     /** Boss 二阶段（半血狂暴） */
@@ -133,29 +138,22 @@ export class Enemy extends Component {
         // —— 显示重置 ——
         this.node.active = true;
         this.node.setScale(1, 1, 1);
+        this.dying = false;
+        this.flashWhite = false;
+        Tween.stopAllByTarget(this.node); // 取消残留的死亡演出 tween
+        const op = this.getComponent(UIOpacity);
+        if (op) {
+            op.opacity = 255;
+            Tween.stopAllByTarget(op);
+        }
+        const col = this.getComponent(BoxCollider2D);
+        if (col) col.enabled = true; // 死亡演出期间会临时禁用
         const ui = this.node.getComponent(UITransform);
         if (ui) ui.setContentSize(config.size, config.size); // 体型
         this.sprite = this.getComponent(Sprite);
         this.baseColor = config.color;
-        if (this.sprite) this.sprite.color = config.color;   // 按类型染色
-        const graphics = this.getComponent(Graphics);
-        if (graphics) {
-            graphics.clear();
-            graphics.fillColor = config.color;
-            // 菱形妖物轮廓，避免与玩家、经验灵珠同为圆形而难以辨识。
-            const r = config.size / 2;
-            graphics.moveTo(0, r);
-            graphics.lineTo(r, 0);
-            graphics.lineTo(0, -r);
-            graphics.lineTo(-r, 0);
-            graphics.close();
-            graphics.fill();
-            graphics.fillColor = new Color(255, 245, 245, 255);
-            graphics.circle(-r * 0.24, r * 0.1, Math.max(2, r * 0.12));
-            graphics.circle(r * 0.24, r * 0.1, Math.max(2, r * 0.12));
-            graphics.fill();
-            this.drawHealthBar(graphics);
-        }
+        if (this.sprite) this.sprite.color = config.color;   // 按类型染色（兼容预制体路径）
+        this.redraw(); // 分型绘制（菱形/三角/六边形 + 双眼 + 头顶血条）
 
         // 登记到战斗系统存活注册表（防重入：同一实例不重复登记）
         if (Enemy.alive.indexOf(this) < 0) Enemy.alive.push(this);
@@ -185,7 +183,7 @@ export class Enemy extends Component {
 
     update(dt: number): void {
         if (GameManager.getInstance().state !== GameState.PLAYING) return; // 暂停时冻结全场
-        if (!this.config || this.recycled) return;
+        if (!this.config || this.recycled || this.dying) return;
 
         this.updateMove(dt);
         this.updateShoot(dt);
@@ -331,11 +329,10 @@ export class Enemy extends Component {
      * @param knockDir 击退方向（单位向量），不传则无击退
      */
     public takeDamage(amount: number, knockDir?: Vec3): void {
-        if (this.recycled || !this.config) return;
+        if (this.recycled || this.dying || !this.config) return;
         this.hp -= amount;
-        this.flashHit(); // 受击闪白
-        const graphics = this.getComponent(Graphics);
-        if (graphics) this.drawHealthBar(graphics);
+        this.flashHit(); // 受击闪白（Graphics 重绘）
+        this.redraw();   // 同步刷新头顶血条
 
         // 击退（精英/Boss 抗性高）
         if (knockDir && knockDir.lengthSqr() > 0.0001) {
@@ -353,13 +350,110 @@ export class Enemy extends Component {
         }
     }
 
-    /** 受击闪白（0.08s 后恢复基础色） */
+    /** 受击闪白（0.08s 后恢复基础色；Graphics 与 Sprite 双路径） */
     private flashHit(): void {
-        if (!this.sprite) return;
-        this.sprite.color = Color.WHITE;
+        this.flashWhite = true;
+        this.redraw();
+        if (this.sprite) this.sprite.color = Color.WHITE;
         this.scheduleOnce(() => {
+            this.flashWhite = false;
+            if (this.recycled || this.dying) return; // 已回收/死亡不再重绘
+            this.redraw();
             if (this.sprite && this.baseColor) this.sprite.color = this.baseColor;
         }, 0.08);
+    }
+
+    // ==================== 占位视觉（Graphics 分型绘制） ====================
+
+    /** 重绘敌人：按类型绘制菱形 / 三角 / 六边形 + 双眼 + 头顶绿色血条 */
+    private redraw(): void {
+        const graphics = this.getComponent(Graphics);
+        if (!graphics || !this.config) return;
+        graphics.clear();
+        const r = this.config.size / 2;
+        const body = this.flashWhite
+            ? new Color(255, 255, 255, 255)
+            : this.config.color;
+        switch (this.config.type) {
+            case EnemyType.RANGED:
+                this.drawTriangle(graphics, r, body);
+                break;
+            case EnemyType.ELITE:
+            case EnemyType.BOSS:
+                this.drawHexagon(graphics, r, body);
+                break;
+            default:
+                this.drawDiamond(graphics, r, body);
+                break;
+        }
+        if (!this.flashWhite) this.drawEyes(graphics, r);
+        this.drawHealthBar(graphics);
+    }
+
+    /** 普通怪：红色菱形 */
+    private drawDiamond(g: Graphics, r: number, color: Color): void {
+        g.fillColor = color;
+        g.moveTo(0, r); g.lineTo(r, 0); g.lineTo(0, -r); g.lineTo(-r, 0); g.close();
+        g.fill();
+        g.lineWidth = 2;
+        g.strokeColor = new Color(255, 255, 255, 90);
+        g.moveTo(0, r); g.lineTo(r, 0); g.lineTo(0, -r); g.lineTo(-r, 0); g.close();
+        g.stroke();
+    }
+
+    /** 远程怪：紫色三角形 */
+    private drawTriangle(g: Graphics, r: number, color: Color): void {
+        g.fillColor = color;
+        g.moveTo(0, r * 1.1);
+        g.lineTo(r * 0.95, -r * 0.8);
+        g.lineTo(-r * 0.95, -r * 0.8);
+        g.close();
+        g.fill();
+        g.lineWidth = 2;
+        g.strokeColor = new Color(255, 255, 255, 90);
+        g.moveTo(0, r * 1.1);
+        g.lineTo(r * 0.95, -r * 0.8);
+        g.lineTo(-r * 0.95, -r * 0.8);
+        g.close();
+        g.stroke();
+    }
+
+    /** 精英 / Boss：橙红六边形（Boss 额外加一圈强调环） */
+    private drawHexagon(g: Graphics, r: number, color: Color): void {
+        const pts: [number, number][] = [];
+        for (let i = 0; i < 6; i++) {
+            const a = (Math.PI / 3) * i - Math.PI / 6;
+            pts.push([Math.cos(a) * r, Math.sin(a) * r]);
+        }
+        g.fillColor = color;
+        g.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < 6; i++) g.lineTo(pts[i][0], pts[i][1]);
+        g.close();
+        g.fill();
+        g.lineWidth = 3;
+        g.strokeColor = new Color(255, 255, 255, 110);
+        g.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < 6; i++) g.lineTo(pts[i][0], pts[i][1]);
+        g.close();
+        g.stroke();
+        if (this.config && this.config.isBoss) {
+            g.lineWidth = 2;
+            g.strokeColor = new Color(255, 255, 255, 70);
+            g.circle(0, 0, r + 8);
+            g.stroke();
+        }
+    }
+
+    /** 白色眼睛（普通/精英两只；远程一只） */
+    private drawEyes(g: Graphics, r: number): void {
+        g.fillColor = new Color(255, 255, 255, 255);
+        if (this.config && this.config.type === EnemyType.RANGED) {
+            g.circle(0, r * 0.15, Math.max(2, r * 0.14));
+        } else {
+            g.circle(-r * 0.28, r * 0.12, Math.max(2, r * 0.13));
+            g.circle(r * 0.28, r * 0.12, Math.max(2, r * 0.13));
+        }
+        g.fill();
     }
 
     /** 在菱形妖物上方补绘一个极简血条，MVP 中让伤害与击杀因果可见。 */
@@ -379,8 +473,8 @@ export class Enemy extends Component {
     // ==================== 死亡 / 掉落 / 回收 ====================
 
     private die(): void {
-        // 不在此处置 recycled：交给 recycle() 统一处理（含防重入保护）。
-        // takeDamage 以 hp<=0 判定，die→recycle 同步完成，不会重复进入。
+        if (this.dying) return;
+        this.dying = true;
         const pos = this.node.worldPosition.clone();
         const cfg = this.config!;
         this.rollDrops(pos, cfg);
@@ -391,7 +485,28 @@ export class Enemy extends Component {
             xp: cfg.xpDrop,
             gold: cfg.goldDrop,
         });
-        this.recycle();
+        this.playDeathAnimation();
+    }
+
+    /**
+     * 死亡演出：0.25s 缩小 + 淡出，随后回收入池（验收：死亡时缩小并淡出）。
+     * 演出期间禁用碰撞体并冻结 AI，避免对已死敌人二次结算。
+     */
+    private playDeathAnimation(): void {
+        const col = this.getComponent(BoxCollider2D);
+        if (col) col.enabled = false;
+        const op = this.getComponent(UIOpacity) ?? this.node.addComponent(UIOpacity);
+        op.opacity = 255;
+        Tween.stopAllByTarget(this.node);
+        Tween.stopAllByTarget(op);
+        this.node.setScale(1, 1, 1);
+        tween(op)
+            .to(0.25, { opacity: 0 })
+            .start();
+        tween(this.node)
+            .to(0.25, { scale: new Vec3(0.1, 0.1, 1) }, { easing: 'quadIn' })
+            .call(() => this.recycle())
+            .start();
     }
 
     /** 掉落结算（通过事件交给拾取物系统生成宝石/灵石/宝箱） */

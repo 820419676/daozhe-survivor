@@ -60,13 +60,13 @@ export class EnemySpawner extends Component {
     @property({ type: Node })
     playerNode: Node = null!;
 
-    /** 初始同屏上限（500；运行中按帧率在 500/300/200 间自动降级/恢复） */
-    @property({ tooltip: '初始同屏上限（运行时按帧率在 500/300/200 间降级）' })
-    maxEnemies: number = 500;
+    /** 初始同屏上限（MVP 验收：60；运行中按帧率在 60/300/200 间自动降级） */
+    @property({ tooltip: '初始同屏上限（MVP=60；运行时按帧率在 60/300/200 间降级）' })
+    maxEnemies: number = 60;
 
     /** 生成间隔（秒）：每个 tick 生成 密度×间隔 只，越小越密 */
     @property({ tooltip: '生成间隔（秒）' })
-    spawnInterval: number = 0.12;
+    spawnInterval: number = 0.5;
 
     /** 妖王（精英）生成间隔（秒），默认 2 分钟 */
     @property({ tooltip: '妖王生成间隔（秒）' })
@@ -78,16 +78,18 @@ export class EnemySpawner extends Component {
 
     /** 地图半宽（与 PlayerController 的 mapHalfWidth 一致，出生点限制用） */
     @property({ tooltip: '地图半宽（px）' })
-    mapHalfWidth: number = 1800;
+    mapHalfWidth: number = 950;
 
     /** 地图半高 */
     @property({ tooltip: '地图半高（px）' })
-    mapHalfHeight: number = 1800;
+    mapHalfHeight: number = 950;
 
     // ==================== 运行时状态 ====================
 
     private spawnTimer: number = 0;
     private eliteTimer: number = 0;
+    /** eliteTimer 惰性初始化标记：GameEntry 可能在 onLoad 之后才设置 eliteInterval（如测试模式 60s） */
+    private eliteTimerInit: boolean = false;
     private gameTime: number = 0;
     private activeEnemies: number = 0;
     private activeElites: number = 0;
@@ -110,7 +112,7 @@ export class EnemySpawner extends Component {
     onLoad(): void {
         EventBus.on(GameEvent.PLAYER_DIED, this.onPlayerDied, this);
         this.spawnTimer = 0.5;      // 开局 0.5s 后开始刷怪
-        this.eliteTimer = this.eliteInterval; // 首只妖王在 2:00
+        // eliteTimer 在 updateElite 首次运行时惰性初始化（见 eliteTimerInit）
     }
 
     update(dt: number): void {
@@ -140,9 +142,18 @@ export class EnemySpawner extends Component {
         }
 
         const minute = Math.floor(this.gameTime / 60);
-        // MVP 首分钟优先验证“看懂自动战斗”，而非压力测试 JS 性能。
-        // 首发约 2 只/秒，之后逐分钟平缓增加。
-        const density = 2 + 0.5 * minute;
+        // MVP 首分钟数值（验收口径）：
+        //   0–20s  约 2 只/秒（轻松教学，便于看懂操作与自动攻击）
+        //   20–60s 线性爬升至约 4 只/秒（逐渐形成包围压力，促使移动）
+        //   60s+   沿用 2 + 0.5×分钟 的增长曲线
+        let density: number;
+        if (this.gameTime < 20) {
+            density = 2;
+        } else if (this.gameTime < 60) {
+            density = 2 + (this.gameTime - 20) / 20;
+        } else {
+            density = 2 + 0.5 * minute;
+        }
         let batch = Math.max(1, Math.round(density * this.spawnInterval));
         if (this.bossActive) batch = Math.max(1, Math.round(batch * 0.3)); // 天劫之战期间减量，聚焦 Boss
         batch = Math.min(batch, Math.max(0, cap - this.activeEnemies));
@@ -161,6 +172,11 @@ export class EnemySpawner extends Component {
     // ==================== 妖王（精英） ====================
 
     private updateElite(dt: number): void {
+        // 惰性初始化：让外部（GameEntry）在 onLoad 之后调整 eliteInterval 也能生效
+        if (!this.eliteTimerInit) {
+            this.eliteTimerInit = true;
+            this.eliteTimer = this.eliteInterval;
+        }
         this.eliteTimer -= dt;
         if (this.eliteTimer > 0) return;
 
@@ -181,6 +197,11 @@ export class EnemySpawner extends Component {
     // ==================== 天劫之主（Boss） ====================
 
     private updateBoss(): void {
+        // 2 分钟测试模式无终局 Boss（对局在 120 秒结束，Boss 属于第二阶段内容）
+        if (this.gameEndTime <= 150) {
+            this.bossSpawned = true;
+            return;
+        }
         const bossTime = this.gameEndTime - 60; // 终局前 1 分钟：900→840s（14:00）/ 1800→1740s（29:00）
         if (this.bossSpawned || this.gameTime < bossTime) return;
         this.bossSpawned = true;
@@ -281,7 +302,12 @@ export class EnemySpawner extends Component {
     private getSpawnPosition(): Vec3 {
         const visible = view.getVisibleSize();
         const margin = 120;
-        const radius = Math.max(visible.width, visible.height) / 2 + margin;
+        // 首局前 12 秒：出生点更近（340–480px），
+        // 保证玩家在 5 秒内看见至少一次飞剑命中（验收要求）
+        const earlyGame = this.gameTime < 12;
+        const radius = earlyGame
+            ? 340 + Math.random() * 140
+            : Math.max(visible.width, visible.height) / 2 + margin;
         const angle = Math.random() * Math.PI * 2;
         const dir = v3(Math.cos(angle), Math.sin(angle), 0);
 
