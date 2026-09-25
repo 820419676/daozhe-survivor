@@ -62,6 +62,12 @@ export interface ProjectileSpawnParams {
     areaRadius?: number;     // 范围伤害半径（px）
     tickInterval?: number;   // 光环伤害间隔（秒）
     bounceCount?: number;    // 弹射次数（非穿透武器命中后转向最近敌人）
+    /**
+     * 死亡回调（在归还对象池之前调用）。
+     * 光环武器（烈焰环）用它清除自身的 auraNode 引用：弹幕到期后节点会回到
+     * 共享对象池，引用若不清除，冷却结束时会被误判为"光环仍在运行"而永不重放。
+     */
+    onDeath?: () => void;
 }
 
 @ccclass('Projectile')
@@ -102,6 +108,10 @@ export class Projectile extends Component {
 
     private _gfx: Graphics | null = null;
     private _color = new Color(255, 255, 255, 255);
+    /** 闪电锯齿偏移缓存（生成一次，避免每帧随机重绘导致闪烁） */
+    private _boltSeeds: number[] = [];
+    /** 死亡回调（die 时调用一次后释放） */
+    private _onDeath: (() => void) | null = null;
 
     // ==================== 对象池 ====================
 
@@ -140,6 +150,10 @@ export class Projectile extends Component {
         this._dead = true;
         this._hitSet.clear();
         this._p = null as unknown as ProjectileSpawnParams; // 释放引用
+        // 死亡回调先于入池执行（光环武器据此清除自身引用）
+        const onDeath = this._onDeath;
+        this._onDeath = null;
+        if (onDeath) onDeath();
         this.node.removeFromParent();
         this.node.active = false;
         this.node.angle = 0;
@@ -157,6 +171,7 @@ export class Projectile extends Component {
     private setup(params: ProjectileSpawnParams): void {
         this._p = params;
         this._dead = false;
+        this._onDeath = params.onDeath ?? null;
         this._elapsed = 0;
         this._traveled = 0;
         this._tickTimer = 0;
@@ -182,6 +197,8 @@ export class Projectile extends Component {
                 const point = params.targetPosition ?? ownerPos;
                 this.node.setWorldPosition(point);
                 this.node.angle = 0;
+                this._boltSeeds = [];
+                for (let i = 0; i < 8; i++) this._boltSeeds.push(Math.random());
                 this._strike();
                 break;
             }
@@ -516,22 +533,28 @@ export class Projectile extends Component {
         g.fill();
     }
 
-    /** 天雷：锯齿闪电 + 落点闪光 */
+    /** 天雷：固定锯齿闪电 + 落点闪光（演出时长由 lifetime 控制，随剩余时间收缩淡出） */
     private drawBolt(g: Graphics): void {
+        // 落点闪光（地面光斑，随时间收缩）
+        const flash = 1 - Math.max(0, Math.min(1, this._elapsed / Math.max(0.01, this._p.lifetime)));
+        const r = (this._p.areaRadius ?? 60) * (0.5 + 0.5 * flash);
+        g.fillColor = new Color(255, 244, 214, Math.round(80 + 100 * flash));
+        g.circle(0, 0, r);
+        g.fill();
+
+        // 竖立锯齿闪电（锯齿坐标生成一次，避免闪烁；尺度收敛在 ~90px）
+        const h = 90;
+        const seg = 8;
         g.lineWidth = 3;
         g.strokeColor = this._color;
-        const h = 260;
-        const seg = 10;
         g.moveTo(0, h);
         for (let i = 1; i <= seg; i++) {
             const yy = h - (h * i) / seg;
-            const xx = i === seg ? 0 : (Math.random() - 0.5) * 36;
+            const seed = this._boltSeeds[i - 1] ?? 0.5;
+            const xx = i === seg ? 0 : (seed - 0.5) * 26;
             g.lineTo(xx, yy);
         }
         g.stroke();
-        g.fillColor = this._color;
-        g.circle(0, 0, (this._p.areaRadius ?? 60) * 0.5);
-        g.fill();
     }
 
     /** 追踪弹占位（小圆点） */

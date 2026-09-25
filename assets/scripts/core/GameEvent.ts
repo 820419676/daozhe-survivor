@@ -65,6 +65,8 @@ export enum GameEvent {
     WEAPON_UPGRADED = 'weapon_upgraded',
     /** 武器进化超武 */
     WEAPON_EVOLVED = 'weapon_evolved',
+    /** 武器开火（{ id, name, level }；DebugPanel 统计释放次数、排查"只释放一次"类问题） */
+    WEAPON_FIRED = 'weapon_fired',
 
     // —— 经验系统 ——
     /** 经验入账（XPSystem 广播，{ amount }） */

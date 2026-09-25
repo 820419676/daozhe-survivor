@@ -102,6 +102,12 @@ export class WeaponSystem extends Component {
                 if (sdt > 0) {
                     this.fireWeapon(id, weapon);
                     weapon.cooldownTimer = weapon.config.cooldown / Math.max(0.1, this.playerData.cooldown);
+                    // 开火统计（DebugPanel 用释放次数排查"只释放一次"类问题）
+                    EventBus.getInstance().emit(GameEvent.WEAPON_FIRED, {
+                        id: weapon.config.id,
+                        name: weapon.config.name,
+                        level: weapon.level,
+                    });
                 }
                 // sdt === 0（完全暂停）：不发射也不重置计时，恢复后立即补发
             }
@@ -422,10 +428,13 @@ export class WeaponSystem extends Component {
 
     /** 烈焰环：以玩家为中心的持续火焰光环（周期性范围灼烧） */
     private activateAura(weapon: WeaponInstance): void {
-        if (weapon.auraNode && weapon.auraNode.isValid) return; // 光环已在运行
+        // 注意：光环弹幕到期后回收到对象池（node.active=false、removeFromParent），
+        // 节点本身仍是 valid —— 守卫必须检查 activeInHierarchy，否则光环整局只放出一次。
+        if (weapon.auraNode && weapon.auraNode.isValid && weapon.auraNode.activeInHierarchy) return; // 光环已在运行
         const cfg = weapon.config;
         const res = DamageSystem.roll(this.playerData, cfg, weapon.level);
-        const proj = Projectile.spawn(this.node, {
+        let proj: Projectile | null = null;
+        proj = Projectile.spawn(this.node, {
             owner: this.node,
             weaponType: cfg.type,
             mode: ProjectileMode.AURA,
@@ -438,6 +447,12 @@ export class WeaponSystem extends Component {
             knockback: cfg.knockback,
             areaRadius: cfg.area * 80,
             tickInterval: 0.5,
+            // 光环结束（到期 / 武器被移除）时清除武器侧引用：
+            // 节点是回收到共享对象池的（可能被雷霆符等借走复用），
+            // 引用不清除会导致下一次冷却被守卫误判为"光环仍在运行"而永不重放。
+            onDeath: () => {
+                if (proj && weapon.auraNode === proj.node) weapon.auraNode = null;
+            },
         });
         weapon.auraNode = proj.node;
     }

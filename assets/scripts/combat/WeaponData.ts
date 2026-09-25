@@ -55,7 +55,7 @@ export const WEAPON_CONFIGS: Record<string, WeaponConfig> = {
     'thunder_talisman': {
         id: 'thunder_talisman', name: '雷霆符', description: '随机天雷轰击',
         type: WeaponType.LIGHTNING, baseDamage: 35, cooldown: 2, projectileCount: 1,
-        area: 2, duration: 0.1, speed: 0, piercing: true, knockback: 0.5,
+        area: 2, duration: 0.35, speed: 0, piercing: true, knockback: 0.5,
         evolutionPair: 'heavenly_secret', evolutionId: 'nine_heaven_thunder',
         targeting: 'random'
     },
@@ -106,7 +106,7 @@ export const WEAPON_CONFIGS: Record<string, WeaponConfig> = {
     'nine_heaven_thunder': {
         id: 'nine_heaven_thunder', name: '九霄神雷', description: '天雷滚滚，三雷连击，万物辟易',
         type: WeaponType.LIGHTNING, baseDamage: 80, cooldown: 1.8, projectileCount: 3,
-        area: 3, duration: 0.15, speed: 0, piercing: true, knockback: 0.8,
+        area: 3, duration: 0.4, speed: 0, piercing: true, knockback: 0.8,
         evolutionPair: '', evolutionId: '',
         targeting: 'random'
     },
