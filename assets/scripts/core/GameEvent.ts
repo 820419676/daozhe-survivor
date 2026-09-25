@@ -35,6 +35,12 @@ export enum GameEvent {
     COMBAT_DAMAGE = 'combat_damage',
     /** 敌人弹幕命中玩家 */
     ENEMY_BULLET_HIT = 'enemy_bullet_hit',
+    /**
+     * 敌人攻击命中玩家（{ damage, kind: 'melee' | 'bullet' }）。
+     * 代码驱动的攻击判定（接触 / 弹幕），不依赖 2D 物理碰撞回调；
+     * PlayerController 收到后统一走 takeDamage（含无敌帧）。
+     */
+    ENEMY_ATTACK = 'enemy_attack',
     /** 敌人掉落经验宝石 */
     DROP_XP = 'drop_xp',
     /** 敌人掉落灵石 */

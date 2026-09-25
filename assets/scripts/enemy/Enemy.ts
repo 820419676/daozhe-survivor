@@ -18,15 +18,21 @@
  */
 import {
     _decorator, Component, Node, Vec3, v3, Sprite, Color,
-    Prefab, UITransform, find, warn, instantiate, Graphics,
+    Prefab, UITransform, find, instantiate, Graphics,
     UIOpacity, BoxCollider2D, tween, Tween,
 } from 'cc';
 import { GameManager, GameState } from '../core/GameManager';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
+import { GAME_CONFIG } from '../core/GameConfig';
 import { EnemyType, EnemyConfig } from './EnemyTypes';
 
 const { ccclass, property } = _decorator;
+
+/** 敌方弹幕参数（未配置 bulletPrefab 时由代码生成弹幕节点） */
+const BULLET_SPEED = 320;
+const BULLET_LIFETIME = 3;
+const BULLET_RADIUS = 7;
 
 /**
  * Spawner 句柄（结构化类型，避免 Enemy ↔ Spawner 互相 import 造成循环依赖）。
@@ -65,10 +71,14 @@ export class Enemy extends Component {
 
     /** 弹幕计时器 */
     private shootTimer: number = 0;
+    /** 接触攻击计时器（贴身后每隔 attackInterval 造成一次伤害） */
+    private attackTimer: number = 0;
     /** 场上属于自己的弹幕（移动/生命周期） */
     private bullets: Node[] = [];
     private bulletVels: Vec3[] = [];
     private bulletLife: number[] = [];
+    /** 每颗弹幕的伤害（与 bullets 平行，命中时结算） */
+    private bulletDamages: number[] = [];
 
     /** 已回收标记（防重复回收/重复回调） */
     private recycled: boolean = false;
@@ -112,6 +122,7 @@ export class Enemy extends Component {
         this.knockbackVel.set(0, 0, 0);
         this.strafePhase = 0;
         this.shootTimer = 0;
+        this.attackTimer = 0.4; // 接触后 0.4s 才首次造成伤害，给玩家反应时间
         this.unscheduleAllCallbacks();
         this.clearBullets();
 
@@ -186,9 +197,29 @@ export class Enemy extends Component {
         if (!this.config || this.recycled || this.dying) return;
 
         this.updateMove(dt);
+        this.updateMeleeAttack(dt);
         this.updateShoot(dt);
         this.updateBullets(dt);
         this.checkDespawn();
+    }
+
+    // ==================== 接触攻击 ====================
+
+    /**
+     * 接触攻击：贴身时按 attackInterval 造成伤害（实际频率受玩家无敌帧限制）。
+     * 走 ENEMY_ATTACK 事件而非直接调用玩家组件，避免 Enemy ↔ PlayerController 循环依赖；
+     * 判定为距离检测（代码驱动），不依赖 2D 物理系统的碰撞回调。
+     */
+    private updateMeleeAttack(dt: number): void {
+        const cfg = this.config;
+        if (!cfg) return;
+        this.attackTimer -= dt;
+        if (this.attackTimer > 0) return;
+        if (!this.findTarget()) return;
+        const reach = this.getRadius() + GAME_CONFIG.player.hitRadius;
+        if (Vec3.squaredDistance(this.node.worldPosition, this.target!.worldPosition) > reach * reach) return;
+        this.attackTimer = Math.max(0.2, cfg.attackInterval);
+        EventBus.emit(GameEvent.ENEMY_ATTACK, { damage: this.damage, kind: 'melee' });
     }
 
     // ==================== 移动 AI ====================
@@ -280,24 +311,53 @@ export class Enemy extends Component {
         }
     }
 
-    /** 发射一颗弹幕（弹速 320px/s，寿命 3s；弹幕节点需自行配置碰撞体并设置组为 ENEMY_BULLET） */
+    /**
+     * 发射一颗弹幕：优先使用 bulletPrefab，未配置时程序化生成，
+     * 保证散修 / 天劫之主始终有攻击手段（此前缺预制体时弹幕完全不发射）。
+     * 命中判定见 updateBullets（距离检测，不依赖 2D 物理碰撞矩阵）。
+     */
     private fireBullet(angle: number): void {
-        if (!this.bulletPrefab) {
-            warn('[Enemy] 远程敌人缺少 bulletPrefab 属性，弹幕未发射');
-            return;
-        }
-        const bullet = instantiate(this.bulletPrefab);
+        const parent = this.node.parent;
+        if (!parent) return;
+
+        const bullet = this.bulletPrefab
+            ? instantiate(this.bulletPrefab)
+            : this.createProceduralBullet();
+        parent.addChild(bullet);
         bullet.setWorldPosition(this.node.worldPosition);
-        bullet['bulletDamage'] = this.damage; // PlayerController 碰撞时读取
-        const v = v3(Math.cos(angle), Math.sin(angle), 0).multiplyScalar(320);
+        bullet['bulletDamage'] = this.damage; // 兼容旧的物理碰撞读取约定
+
         this.bullets.push(bullet);
-        this.bulletVels.push(v);
-        this.bulletLife.push(3);
-        if (this.node.parent) this.node.parent.addChild(bullet);
+        this.bulletVels.push(v3(Math.cos(angle), Math.sin(angle), 0).multiplyScalar(BULLET_SPEED));
+        this.bulletLife.push(BULLET_LIFETIME);
+        this.bulletDamages.push(this.damage);
     }
 
-    /** 驱动弹幕移动与生命周期 */
+    /** 程序化弹幕（紫色灵光弹）：无美术资源时的占位视觉 */
+    private createProceduralBullet(): Node {
+        const bullet = new Node('EnemyBullet');
+        bullet.addComponent(UITransform).setContentSize(BULLET_RADIUS * 3, BULLET_RADIUS * 3);
+        const g = bullet.addComponent(Graphics);
+        // 外圈柔光
+        g.fillColor = new Color(186, 120, 255, 70);
+        g.circle(0, 0, BULLET_RADIUS + 4);
+        g.fill();
+        // 弹体
+        g.fillColor = new Color(198, 138, 255, 255);
+        g.circle(0, 0, BULLET_RADIUS);
+        g.fill();
+        // 白色描边
+        g.lineWidth = 2;
+        g.strokeColor = new Color(255, 255, 255, 200);
+        g.circle(0, 0, BULLET_RADIUS);
+        g.stroke();
+        return bullet;
+    }
+
+    /** 驱动弹幕移动、命中玩家判定与生命周期 */
     private updateBullets(dt: number): void {
+        const target = this.target && this.target.isValid ? this.target : null;
+        const hitRadius = BULLET_RADIUS + GAME_CONFIG.player.hitRadius;
         for (let i = this.bullets.length - 1; i >= 0; i--) {
             const b = this.bullets[i];
             const v = this.bulletVels[i];
@@ -305,13 +365,29 @@ export class Enemy extends Component {
             const overRange = Math.abs(b.position.x) > 4000 || Math.abs(b.position.y) > 4000;
             if (!b.isValid || this.bulletLife[i] <= 0 || overRange) {
                 if (b.isValid) b.destroy();
-                this.bullets.splice(i, 1);
-                this.bulletVels.splice(i, 1);
-                this.bulletLife.splice(i, 1);
+                this.removeBulletAt(i);
                 continue;
             }
             b.setPosition(b.position.x + v.x * dt, b.position.y + v.y * dt, 0);
+
+            // 命中玩家：距离判定 + 广播 ENEMY_ATTACK（不依赖 2D 物理）
+            if (target && Vec3.squaredDistance(b.worldPosition, target.worldPosition) <= hitRadius * hitRadius) {
+                EventBus.emit(GameEvent.ENEMY_ATTACK, {
+                    damage: this.bulletDamages[i] ?? this.damage,
+                    kind: 'bullet',
+                });
+                b.destroy();
+                this.removeBulletAt(i);
+            }
         }
+    }
+
+    /** 移除第 i 颗弹幕的全部平行记录 */
+    private removeBulletAt(i: number): void {
+        this.bullets.splice(i, 1);
+        this.bulletVels.splice(i, 1);
+        this.bulletLife.splice(i, 1);
+        this.bulletDamages.splice(i, 1);
     }
 
     private clearBullets(): void {
@@ -319,6 +395,7 @@ export class Enemy extends Component {
         this.bullets.length = 0;
         this.bulletVels.length = 0;
         this.bulletLife.length = 0;
+        this.bulletDamages.length = 0;
     }
 
     // ==================== 受击 ====================

@@ -52,6 +52,8 @@ export interface EnemyConfig {
     canShoot: boolean;
     /** 弹幕发射间隔（秒） */
     shootInterval: number;
+    /** 接触攻击间隔（秒；贴身后每隔该时间造成一次伤害，实际频率受玩家无敌帧限制） */
+    attackInterval: number;
     /** 是否 Boss */
     isBoss: boolean;
     /** 宝箱掉落率（0~1；普通 0.5%，精英/Boss 100%） */
@@ -67,7 +69,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
         type: EnemyType.BASIC,
         displayName: '小妖',
         hp: 20,          // 基础血量，随 1.35^分钟 增长
-        damage: 8,       // 玩家 100 HP 约可挨 12 下，配合 0.5s 无敌帧
+        damage: 5,       // 玩家 100 HP 约可挨 20 下（配合 0.8s 无敌帧 ≈ 连续贴身 16 秒）
         speed: 90,
         xpDrop: 1,       // 蓝宝石 = 1 点经验
         goldDrop: 1,
@@ -75,6 +77,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
         color: new Color(225, 88, 112), // 赤红，首屏可与玩家/灵珠明确区分
         canShoot: false,
         shootInterval: 0,
+        attackInterval: 1.0,
         isBoss: false,
         chestDropRate: 0.005, // 0.5%
         knockResistance: 0,
@@ -85,7 +88,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
         type: EnemyType.RANGED,
         displayName: '散修',
         hp: 12,          // 脆皮，鼓励玩家优先集火
-        damage: 6,
+        damage: 4,
         speed: 65,       // 慢速，维持 260px 攻击距离
         xpDrop: 2,
         goldDrop: 2,
@@ -93,6 +96,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
         color: new Color(156, 116, 214), // 紫
         canShoot: true,
         shootInterval: 2.4,
+        attackInterval: 1.2,
         isBoss: false,
         chestDropRate: 0.005, // 0.5%
         knockResistance: 0,
@@ -103,7 +107,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
         type: EnemyType.ELITE,
         displayName: '妖王',
         hp: 1500,        // 按 1500 × (1 + 0.12×分钟) 缩放
-        damage: 15,
+        damage: 10,
         speed: 120,      // 追击型精英
         xpDrop: 5,       // 紫宝石 = 5 点经验
         goldDrop: 25,
@@ -111,6 +115,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
         color: new Color(255, 112, 40), // 橙红（六边形精英，验收视觉）
         canShoot: false, // 技能系统后续接入：冲锋 / 放射弹 / 召唤杂鱼
         shootInterval: 0,
+        attackInterval: 1.2,
         isBoss: false,
         chestDropRate: 1, // 100% 掉宝箱（GDD 4.2.6）
         knockResistance: 0.6,
@@ -121,14 +126,15 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
         type: EnemyType.BOSS,
         displayName: '天劫之主',
         hp: 9000,        // 占位基础值，生成时由 Spawner 按玩家 DPS 动态覆盖
-        damage: 30,
+        damage: 18,
         speed: 100,
         xpDrop: 200,     // 大量经验
         goldDrop: 300,
         size: 140,
         color: new Color(92, 44, 148), // 暗紫（雷劫意象）
         canShoot: true,
-        shootInterval: 1.1, // 8 向弹幕，P2 狂暴后 ×0.6
+        shootInterval: 1.6, // 8 向弹幕，P2 狂暴后 ×0.6
+        attackInterval: 1.0,
         isBoss: true,
         chestDropRate: 1,   // 传说宝箱
         knockResistance: 0.85,

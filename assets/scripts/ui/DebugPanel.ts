@@ -68,6 +68,8 @@ export class DebugPanel extends Component {
     private stateLabel: Label | null = null;
 
     private kills: number = 0;
+    /** 本局累计承受伤害（验证敌人攻击是否真的生效） */
+    private damageTaken: number = 0;
     /** 武器 id → 开火次数（WEAPON_FIRED 累计，GAME_START 清零） */
     private fireCounts: Map<string, number> = new Map();
     private refreshTimer: number = 0;
@@ -76,8 +78,13 @@ export class DebugPanel extends Component {
         this.kills++;
     };
 
+    private onPlayerDamaged = (payload: { amount?: number }): void => {
+        this.damageTaken += payload?.amount ?? 0;
+    };
+
     private onGameStart = (): void => {
         this.kills = 0;
+        this.damageTaken = 0;
         this.fireCounts.clear();
     };
 
@@ -89,6 +96,7 @@ export class DebugPanel extends Component {
     onLoad(): void {
         const bus = EventBus.getInstance();
         bus.on(GameEvent.ENEMY_KILLED, this.onEnemyKilled);
+        bus.on(GameEvent.PLAYER_DAMAGED, this.onPlayerDamaged);
         bus.on(GameEvent.GAME_START, this.onGameStart);
         bus.on(GameEvent.WEAPON_FIRED, this.onWeaponFired);
         this.buildUI();
@@ -97,6 +105,7 @@ export class DebugPanel extends Component {
     onDestroy(): void {
         const bus = EventBus.getInstance();
         bus.off(GameEvent.ENEMY_KILLED, this.onEnemyKilled);
+        bus.off(GameEvent.PLAYER_DAMAGED, this.onPlayerDamaged);
         bus.off(GameEvent.GAME_START, this.onGameStart);
         bus.off(GameEvent.WEAPON_FIRED, this.onWeaponFired);
     }
@@ -155,7 +164,7 @@ export class DebugPanel extends Component {
         }
         if (this.hpLabel) {
             this.hpLabel.string = pd
-                ? `HP ${Math.ceil(pd.hp)}/${pd.maxHp}  暴击${Math.round(pd.critChance * 100)}%  磁吸${Math.round(pd.pickupRange)}  道心${Math.round(pd.bravery)}`
+                ? `HP ${Math.ceil(pd.hp)}/${pd.maxHp}  受伤${this.damageTaken}  暴击${Math.round(pd.critChance * 100)}%  磁吸${Math.round(pd.pickupRange)}  道心${Math.round(pd.bravery)}`
                 : 'HP —';
         }
         if (this.stateLabel) {

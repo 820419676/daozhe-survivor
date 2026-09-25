@@ -27,10 +27,12 @@ import {
     _decorator, Component, Node, Vec3, Vec2, v3, Sprite, Color,
     Collider2D, UITransform, Prefab, view, warn,
     EventTouch, Contact2DType, IPhysics2DContact, Graphics, Label,
+    UIOpacity, tween, Tween,
 } from 'cc';
 import { GameManager, GameState } from '../core/GameManager';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
+import { GAME_CONFIG } from '../core/GameConfig';
 import { PlayerData } from './PlayerData';
 import { PlayerRegistry } from '../core/PlayerRegistry';
 import { XPSystem } from '../progression/XPSystem';
@@ -95,10 +97,12 @@ export class PlayerController extends Component {
     private sprite: Sprite | null = null;
     private baseColor: Color | null = null;
 
-    // —— 玩家视觉（Graphics 程序化：方向箭头 / HP 条） ——
+    // —— 玩家视觉（Graphics 程序化：方向箭头 / HP 条 / 受击光圈） ——
     private arrowNode: Node | null = null;
     private hpBarGfx: Graphics | null = null;
     private hpLabel: Label | null = null;
+    private hitFlashNode: Node | null = null;
+    private hitFlashOp: UIOpacity | null = null;
 
     // ==================== 静态注册表 ====================
 
@@ -163,6 +167,7 @@ export class PlayerController extends Component {
         EventBus.off(GameEvent.ENEMY_KILLED, this.onEnemyKilled, this);
         EventBus.off(GameEvent.PLAYER_DAMAGED, this.onPlayerDamaged, this);
         EventBus.off(GameEvent.PLAYER_HP_CHANGED, this.onPlayerHpChanged, this);
+        EventBus.off(GameEvent.ENEMY_ATTACK, this.onEnemyAttack, this);
         this.unscheduleAllCallbacks();
     }
 
@@ -365,13 +370,21 @@ export class PlayerController extends Component {
 
     // ==================== 伤害 / 死亡 ====================
 
-    /** 受伤：扣血 + 0.5s 无敌帧 + 闪白反馈 */
+    /**
+     * 受伤：扣血 + 无敌帧 + 反馈。
+     * 伤害来源（敌人接触 / 敌方弹幕）统一由 GameEvent.ENEMY_ATTACK 事件驱动，
+     * 判定在 Enemy 侧做距离检测，不依赖 2D 物理系统的碰撞回调。
+     */
     public takeDamage(amount: number): void {
         if (this.isInvincible || this.isDead || amount <= 0) return;
         this.data.hp -= amount;
         this.isInvincible = true;
-        this.scheduleOnce(() => (this.isInvincible = false), 0.5); // 无敌帧
+        this.scheduleOnce(
+            () => (this.isInvincible = false),
+            GAME_CONFIG.player.invincibleFrames,
+        ); // 无敌帧（数值收敛在 GameConfig）
         this.flashHit();
+        this.refreshHpBar();
         EventBus.emit(GameEvent.PLAYER_DAMAGED, { hp: this.data.hp, maxHp: this.data.maxHp, amount });
         if (this.data.hp <= 0) {
             this.data.hp = 0;
@@ -379,13 +392,35 @@ export class PlayerController extends Component {
         }
     }
 
-    /** 受击闪白 0.1s */
+    /** 受击反馈：Sprite 闪白（若挂了 Sprite）+ 红色受击光圈 */
     private flashHit(): void {
-        if (!this.sprite) return;
-        this.sprite.color = Color.WHITE;
-        this.scheduleOnce(() => {
-            if (this.sprite && this.baseColor) this.sprite.color = this.baseColor;
-        }, 0.1);
+        if (this.sprite) {
+            this.sprite.color = Color.WHITE;
+            this.scheduleOnce(() => {
+                if (this.sprite && this.baseColor) this.sprite.color = this.baseColor;
+            }, 0.1);
+        }
+        this.playHitFlash();
+    }
+
+    /**
+     * 红色受击光圈（0.25s 淡出）。
+     * 程序化玩家节点只有 Graphics、没有 Sprite，闪白无效，因此单独做一层反馈，
+     * 让玩家明确感知"我正在挨打"。
+     */
+    private playHitFlash(): void {
+        const node = this.hitFlashNode;
+        const op = this.hitFlashOp;
+        if (!node || !node.isValid || !op) return;
+        node.active = true;
+        Tween.stopAllByTarget(op);
+        op.opacity = 180;
+        tween(op)
+            .to(0.25, { opacity: 0 })
+            .call(() => {
+                if (node.isValid) node.active = false;
+            })
+            .start();
     }
 
     /** 治疗（击杀妖王 +30、吃血丹 +20 等调用） */
@@ -435,7 +470,14 @@ export class PlayerController extends Component {
         EventBus.on(GameEvent.ENEMY_KILLED, this.onEnemyKilled, this);
         EventBus.on(GameEvent.PLAYER_DAMAGED, this.onPlayerDamaged, this);
         EventBus.on(GameEvent.PLAYER_HP_CHANGED, this.onPlayerHpChanged, this);
+        EventBus.on(GameEvent.ENEMY_ATTACK, this.onEnemyAttack, this);
     }
+
+    /** 敌人攻击命中（接触 / 弹幕）→ 统一走 takeDamage（含无敌帧） */
+    private onEnemyAttack = (payload: { damage: number; kind?: string }): void => {
+        if (!payload) return;
+        this.takeDamage(payload.damage ?? 0);
+    };
 
     /** 击杀妖王（精英）回血 30（GDD 4.2.7） */
     private onEnemyKilled(payload: { type: EnemyType }): void {
@@ -479,6 +521,23 @@ export class PlayerController extends Component {
         this.hpLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
         this.hpLabel.verticalAlign = Label.VerticalAlign.CENTER;
         this.hpLabel.color = new Color(240, 244, 248, 255);
+
+        // —— 受击光圈（红色，默认隐藏，受击时闪一下） ——
+        const flash = new Node('PlayerHitFlash');
+        flash.setParent(this.node);
+        flash.addComponent(UITransform).setContentSize(80, 80);
+        const fg = flash.addComponent(Graphics);
+        fg.fillColor = new Color(255, 70, 70, 90);
+        fg.circle(0, 0, 26);
+        fg.fill();
+        fg.lineWidth = 3;
+        fg.strokeColor = new Color(255, 120, 120, 220);
+        fg.circle(0, 0, 26);
+        fg.stroke();
+        this.hitFlashOp = flash.addComponent(UIOpacity);
+        this.hitFlashOp.opacity = 0;
+        flash.active = false;
+        this.hitFlashNode = flash;
 
         this.refreshHpBar();
     }
