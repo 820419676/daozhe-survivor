@@ -27,6 +27,7 @@ import { Enemy } from '../enemy/Enemy';
 import { DamageSystem } from './DamageSystem';
 import { WeaponType } from './WeaponData';
 import { GameManager } from '../core/GameManager';
+import { BuildSystem } from '../progression/BuildSystem';
 
 const { ccclass } = _decorator;
 
@@ -379,7 +380,17 @@ export class Projectile extends Component {
         const dir = Vec3.subtract(new Vec3(), enemy.node.worldPosition, this.node.worldPosition);
         const len = dir.length();
         if (len > 0.001) dir.multiplyScalar(this._p.knockback / len);
-        DamageSystem.applyDamage(enemy, this._p.damage, this._p.isCrit, dir);
+
+        // 流派天赋「剑意贯虹」：飞剑每穿透一个敌人伤害 +20%（最多 5 层，
+        // 层数 = 本弹幕在此之前已穿过的敌人数）。
+        // 仅作用于直线穿透弹（飞剑术/千剑诀），环绕剑阵按圈切割不计入"穿透"。
+        let damage = this._p.damage;
+        if (this._p.mode === ProjectileMode.LINEAR && this._p.piercing && BuildSystem.hasTalent('sword_pierce')) {
+            const stacks = Math.min(5, Math.max(0, this._hitSet.size - 1));
+            damage = Math.round(damage * (1 + 0.2 * stacks));
+        }
+
+        DamageSystem.applyDamage(enemy, damage, this._p.isCrit, dir);
 
         if (this._p.piercing) return; // 穿透：继续飞行
 
@@ -429,6 +440,10 @@ export class Projectile extends Component {
                 const len = dir.length();
                 if (len > 0.001) dir.multiplyScalar(this._p.knockback / len);
                 DamageSystem.applyDamage(enemy, this._p.damage, this._p.isCrit, dir);
+                // 流派天赋「焚天领域」：处于烈焰环内的敌人移速 -25%
+                if (this._p.mode === ProjectileMode.AURA && BuildSystem.hasTalent('flame_domain')) {
+                    enemy.applySlow(0.4, 0.75);
+                }
             }
         }
     }

@@ -29,6 +29,10 @@ import { PlayerData } from '../player/PlayerData';
 import { PASSIVE_CONFIGS } from '../combat/PassiveData';
 import { WEAPON_CONFIGS } from '../combat/WeaponData';
 import { EvolutionSystem, MAX_PASSIVE_LEVEL, MAX_WEAPON_LEVEL } from './EvolutionSystem';
+import {
+    BuildSystem, BuildTag, TAG_COLORS, TAG_NAMES, TALENTS,
+} from './BuildSystem';
+import { RewardPanel } from './RewardPanel';
 
 const { ccclass } = _decorator;
 
@@ -57,6 +61,8 @@ interface LevelUpOption {
     name: string;
     desc: string;
     rarity: Rarity;
+    /** 流派标签（连续 3 次同标签 → 触发该流派天赋） */
+    tag: BuildTag;
     evolutionHint?: string; // 进化提示（"就差一件！"近失效应，GDD 4.2.5）
 }
 
@@ -80,12 +86,15 @@ const RARITY_NAMES: Record<Rarity, string> = {
 };
 
 /** 属性大礼包内容（GDD 4.2.3；PlayerData 属性为倍率制，起点 1） */
-const STAT_PACKS: { kind: StatKind; name: string; desc: string }[] = [
-    { kind: 'might', name: '力量', desc: '伤害 +20%' },
-    { kind: 'speed', name: '身法', desc: '移速 +15%' },
-    { kind: 'area', name: '范围', desc: '攻击范围 +15%' },
-    { kind: 'luck', name: '运气', desc: '幸运 +1' },
+const STAT_PACKS: { kind: StatKind; name: string; desc: string; tag: BuildTag }[] = [
+    { kind: 'might', name: '力量', desc: '伤害 +20%', tag: BuildTag.BURST },
+    { kind: 'speed', name: '身法', desc: '移速 +15%', tag: BuildTag.SURVIVAL },
+    { kind: 'area', name: '范围', desc: '攻击范围 +15%', tag: BuildTag.SUSTAIN },
+    { kind: 'luck', name: '运气', desc: '幸运 +1', tag: BuildTag.SUSTAIN },
 ];
+
+/** 前 N 次升级必须出现"新武器"（保证首局尽快形成构筑方向） */
+const EARLY_GUARANTEE_LEVELS = 3;
 
 @ccclass('LevelUpUI')
 export class LevelUpUI extends Component {
@@ -97,6 +106,8 @@ export class LevelUpUI extends Component {
     private currentOptions: LevelUpOption[] = [];
     private rerollCount = 0;
     private shown = false;
+    /** 本局已完成的升级次数（前 3 次保证出现新武器；GAME_START 清零） */
+    private levelUpCount = 0;
     /** 问心进行中时收到的升级（问心结束后补弹） */
     private pendingLevelUp = false;
 
@@ -107,11 +118,16 @@ export class LevelUpUI extends Component {
     // —— 事件回调（框架 EventBus 不绑定 this，必须用箭头函数保持引用稳定） ——
     private handlePlayerLevelUp = () => { this.onPlayerLevelUp(); };
     private handleWenxinResult = () => { this.onWenxinResult(); };
+    private handleGameStart = () => {
+        this.levelUpCount = 0;
+        BuildSystem.resetRun(); // 流派标签/天赋为本局作用域
+    };
 
     onLoad() {
         const bus = EventBus.getInstance();
         bus.on(GameEvent.PLAYER_LEVEL_UP, this.handlePlayerLevelUp);
         bus.on(GameEvent.WENXIN_RESULT, this.handleWenxinResult);
+        bus.on(GameEvent.GAME_START, this.handleGameStart);
         this.buildUI();
         this.node.active = false;
     }
@@ -120,6 +136,7 @@ export class LevelUpUI extends Component {
         const bus = EventBus.getInstance();
         bus.off(GameEvent.PLAYER_LEVEL_UP, this.handlePlayerLevelUp);
         bus.off(GameEvent.WENXIN_RESULT, this.handleWenxinResult);
+        bus.off(GameEvent.GAME_START, this.handleGameStart);
     }
 
     /** 玩家升级：框架已自动进入升级暂停，这里负责弹面板 */
@@ -205,6 +222,7 @@ export class LevelUpUI extends Component {
                     opt: {
                         type: 'new_weapon', weaponId: id,
                         name: cfg.name, desc: cfg.description, rarity: Rarity.NORMAL,
+                        tag: cfg.buildTag,
                     },
                     weight: 3,
                 });
@@ -221,7 +239,8 @@ export class LevelUpUI extends Component {
                 name: `${cfg.name} Lv.${slot.level}`,
                 desc: cfg.description,
                 rarity: Rarity.NORMAL,
-                evolutionHint: this.getEvolutionHint(cfg.id, slot.level, pd),
+                tag: cfg.buildTag,
+                evolutionHint: this.getEvolutionHint(cfg.id, slot.level, pd) ?? undefined,
             };
             weighted.push({ opt, weight: 1 });
         }
@@ -235,6 +254,7 @@ export class LevelUpUI extends Component {
                     type: 'passive_up', passiveId: slot.id,
                     name: `${cfg.name} Lv.${slot.level}`,
                     desc: cfg.description, rarity: Rarity.NORMAL,
+                    tag: cfg.buildTag,
                 },
                 weight: 1,
             });
@@ -248,6 +268,7 @@ export class LevelUpUI extends Component {
                 opt: {
                     type: 'new_passive', passiveId: id,
                     name: cfg.name, desc: cfg.description, rarity: Rarity.NORMAL,
+                    tag: cfg.buildTag,
                 },
                 weight: 1.5,
             });
@@ -259,6 +280,7 @@ export class LevelUpUI extends Component {
                 opt: {
                     type: 'stat_pack', statKind: pack.kind,
                     name: pack.name, desc: pack.desc, rarity: Rarity.NORMAL,
+                    tag: pack.tag,
                 },
                 weight: 1.2,
             });
@@ -271,6 +293,7 @@ export class LevelUpUI extends Component {
                     opt: {
                         type: 'stat_pack', statKind: pack.kind,
                         name: pack.name, desc: pack.desc, rarity: Rarity.NORMAL,
+                        tag: pack.tag,
                     },
                     weight: 1,
                 });
@@ -280,6 +303,17 @@ export class LevelUpUI extends Component {
         // 按权重抽 3 个不重复的选项
         const picked: LevelUpOption[] = [];
         const pool = weighted.slice();
+
+        // 前 3 次升级：必定出现一个"新武器"（形成构筑方向的硬保障）
+        if (this.levelUpCount < EARLY_GUARANTEE_LEVELS) {
+            const idx = pool.findIndex((w) => w.opt.type === 'new_weapon');
+            if (idx >= 0) {
+                const chosen = pool.splice(idx, 1)[0];
+                chosen.opt.rarity = this.rollRarity();
+                picked.push(chosen.opt);
+            }
+        }
+
         while (picked.length < OPTION_COUNT && pool.length > 0) {
             let total = 0;
             for (const w of pool) total += w.weight;
@@ -348,15 +382,26 @@ export class LevelUpUI extends Component {
                 nameLabel.color = hexColor(RARITY_COLORS[opt.rarity]);
             }
 
+            // 流派标签（颜色区分：爆发橙 / 持续蓝 / 生存绿）
+            const tagLabel = card.getChildByName('Tag')?.getComponent(Label);
+            if (tagLabel) {
+                tagLabel.string = TAG_NAMES[opt.tag];
+                tagLabel.color = hexColor(TAG_COLORS[opt.tag]);
+            }
+
             const descLabel = card.getChildByName('Desc')?.getComponent(Label);
             if (descLabel) {
                 descLabel.string = opt.desc;
             }
 
+            // 提示行：优先显示"可形成流派"（本次选择会凑满 3 连标签）
+            const willFormTalent = BuildSystem.wouldCompleteTalent(opt.tag);
+            const hintText = willFormTalent ? '可形成流派' : (opt.evolutionHint ?? '');
             const hintLabel = card.getChildByName('Hint')?.getComponent(Label);
             if (hintLabel) {
-                hintLabel.string = opt.evolutionHint ?? '';
-                hintLabel.node.active = !!opt.evolutionHint;
+                hintLabel.string = hintText;
+                hintLabel.node.active = hintText.length > 0;
+                hintLabel.color = hexColor(willFormTalent ? '#FFD700' : '#FFB74D');
             }
         });
     }
@@ -369,7 +414,38 @@ export class LevelUpUI extends Component {
         const opt = this.currentOptions[index];
         if (!opt || !this.shown) return;
         this.applyOption(opt);
+        // 记录流派标签：连续 3 次同标签 → 触发该流派的流派天赋
+        BuildSystem.recordPick(opt.tag);
+        this.levelUpCount++;
         this.hide();
+        // 面板关闭（恢复游戏）后再弹天赋，避免两个弹层叠加
+        this.scheduleOnce(() => this.tryTriggerTalent(), 0);
+    }
+
+    /**
+     * 连续 3 次选择同一标签 → 弹出该流派的"流派天赋"选择。
+     * 复用通用三选一面板（RewardPanel），天赋必须改变玩法表现（见 BuildSystem.TALENTS）。
+     */
+    private tryTriggerTalent(): void {
+        const candidates = BuildSystem.consumeTalentTrigger();
+        if (candidates.length === 0) return;
+
+        const options = candidates.map((t) => ({ id: t.id, name: t.name, desc: t.desc }));
+        const tagName = TAG_NAMES[candidates[0].tag];
+        const opened = RewardPanel.open(
+            '流派天赋',
+            `「${tagName}」流派成型 · 选择一项天赋`,
+            options,
+            (id) => this.grantTalent(id),
+        );
+        if (!opened) this.grantTalent(options[0].id); // 面板占线时不丢天赋
+    }
+
+    /** 授予流派天赋并广播（Banner 显示"流派天赋：X"） */
+    private grantTalent(id: string): void {
+        BuildSystem.grantTalent(id);
+        const def = TALENTS[id];
+        if (def) EventBus.getInstance().emit(GameEvent.TALENT_GAINED, { talentId: id, name: def.name });
     }
 
     /** 洗牌：消耗一次洗牌次数重新生成 */
@@ -481,6 +557,11 @@ export class LevelUpUI extends Component {
             const nameLabel = makeLabel(card, '', 28, '#FFFFFF', CARD_W - 40, 40);
             nameLabel.node.name = 'Name';
             nameLabel.node.setPosition(0, 44, 0);
+
+            // 流派标签（右上角，颜色区分）
+            const tagLabel = makeLabel(card, '', 20, '#F97316', 100, 30);
+            tagLabel.node.name = 'Tag';
+            tagLabel.node.setPosition(CARD_W / 2 - 62, 44, 0);
 
             const descLabel = makeLabel(card, '', 20, '#E0E0E0', CARD_W - 60, 40);
             descLabel.node.name = 'Desc';

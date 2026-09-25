@@ -16,7 +16,7 @@
 
 import {
     _decorator, Component, EventTouch, Graphics, Label, Node, Tween,
-    UITransform, Vec3, view, tween, Button,
+    UITransform, UIOpacity, Vec3, view, tween, Button,
 } from 'cc';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
@@ -25,6 +25,7 @@ import { GameManager, GameState } from '../core/GameManager';
 import { PlayerController } from '../player/PlayerController';
 import { Enemy } from '../enemy/Enemy';
 import { DamageSystem } from '../combat/DamageSystem';
+import { BuildSystem } from '../progression/BuildSystem';
 import { hexColor } from '../core/UIUtils';
 import { Banner } from '../ui/Banner';
 
@@ -55,6 +56,12 @@ export class DashAbility extends Component {
     private passedCount: number = 0;
     /** 下一次冲刺伤害翻倍（灵脉奖励"御风步·刷新"赋予） */
     private doubleDamageNextDash: boolean = false;
+
+    /** 实际冷却（流派天赋「流云身法」-2 秒；下限 1.5 秒） */
+    private getCooldown(): number {
+        const reduction = BuildSystem.hasTalent('cloud_step') ? 2 : 0;
+        return Math.max(1.5, GAME_CONFIG.dash.cooldown - reduction);
+    }
 
     // —— UI ——
     private btnNode: Node | null = null;
@@ -142,7 +149,38 @@ export class DashAbility extends Component {
         player.setDashInvincible(true); // 冲刺期间无敌
         player.setDashing(true);        // 暂停拖拽，位移由本组件接管
 
+        // 流派天赋「流云身法」：起点留下 1 秒残影，吸引附近敌人
+        if (BuildSystem.hasTalent('cloud_step')) {
+            this.spawnAfterimage(player.node.position.clone());
+        }
+
         EventBus.emit(GameEvent.DASH_STARTED, { direction: this.dashDir.clone() });
+    }
+
+    /** 残影：1 秒内吸引附近敌人扑向起点（视觉为青色虚影） */
+    private spawnAfterimage(position: Vec3): void {
+        const node = new Node('DashAfterimage');
+        node.setParent(this.node);
+        node.addComponent(UITransform).setContentSize(64, 64);
+        const g = node.addComponent(Graphics);
+        g.fillColor = hexColor('#5EEAD4', 70);
+        g.circle(0, 0, 24);
+        g.fill();
+        g.lineWidth = 3;
+        g.strokeColor = hexColor('#5EEAD4', 210);
+        g.circle(0, 0, 24);
+        g.stroke();
+        node.setPosition(position.x, position.y, 0);
+
+        Enemy.setDecoy(node);
+        const op = node.addComponent(UIOpacity);
+        tween(op)
+            .to(1.0, { opacity: 0 })
+            .call(() => {
+                Enemy.clearDecoy(node);
+                if (node.isValid) node.destroy();
+            })
+            .start();
     }
 
     /** 冲刺位移：每帧推进 + 路径击退判定 */
@@ -199,7 +237,7 @@ export class DashAbility extends Component {
             player.setDashing(false);
         }
         if (completed) {
-            this.cooldown = GAME_CONFIG.dash.cooldown;
+            this.cooldown = this.getCooldown();
             EventBus.emit(GameEvent.DASH_ENDED, { passed: this.passedCount });
             if (this.passedCount >= GAME_CONFIG.dash.perfectCount) {
                 Banner.show('身法绝妙', '#5EEAD4', 1.2);
@@ -293,7 +331,7 @@ export class DashAbility extends Component {
             g.stroke();
 
             // 环形进度：从 12 点方向顺时针长满（剩余比例）
-            const ratio = Math.max(0, Math.min(1, this.cooldown / GAME_CONFIG.dash.cooldown));
+            const ratio = Math.max(0, Math.min(1, this.cooldown / this.getCooldown()));
             const steps = 28;
             const filled = Math.round(steps * (1 - ratio));
             g.lineWidth = 5;

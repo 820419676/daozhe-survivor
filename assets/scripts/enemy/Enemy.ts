@@ -123,6 +123,32 @@ export class Enemy extends Component {
     /** 火圈预警圈节点 */
     private novaWarnNode: Node | null = null;
 
+    // —— 减速（流派天赋「焚天领域」等施加） ——
+    private slowTimer: number = 0;
+    private slowFactor: number = 1;
+
+    // —— 残影诱饵（流派天赋「流云身法」） ——
+    /** 当前残影节点：范围内的敌人会被吸引过去 */
+    private static decoy: Node | null = null;
+    /** 残影吸引半径（px） */
+    private static readonly DECOY_ATTRACT_RANGE = 420;
+
+    /** 设置/清除残影诱饵（御风步冲刺后留下） */
+    public static setDecoy(node: Node | null): void {
+        Enemy.decoy = node;
+    }
+
+    public static clearDecoy(node: Node): void {
+        if (Enemy.decoy === node) Enemy.decoy = null;
+    }
+
+    /** 施加减速（取更强的一次，不叠加） */
+    public applySlow(seconds: number, factor: number): void {
+        if (this.recycled || this.dying) return;
+        this.slowTimer = Math.max(this.slowTimer, seconds);
+        this.slowFactor = Math.min(this.slowFactor, Math.max(0.1, factor));
+    }
+
     /** 已回收标记（防重复回收/重复回调） */
     private recycled: boolean = false;
     /** 死亡演出中（缩小+淡出，期间冻结 AI 与碰撞） */
@@ -182,6 +208,8 @@ export class Enemy extends Component {
         this.stunTimer = 0;
         this.novaTimer = config.novaSkill ? config.novaSkill.interval * 0.5 : 0;
         this.novaTelegraph = 0;
+        this.slowTimer = 0;
+        this.slowFactor = 1;
         this.destroyChargeWarning();
         this.clearNovaWarning();
         this.unscheduleAllCallbacks();
@@ -256,6 +284,11 @@ export class Enemy extends Component {
     update(dt: number): void {
         if (GameManager.getInstance().state !== GameState.PLAYING) return; // 暂停时冻结全场
         if (!this.config || this.recycled || this.dying) return;
+
+        if (this.slowTimer > 0) {
+            this.slowTimer -= dt;
+            if (this.slowTimer <= 0) this.slowFactor = 1;
+        }
 
         // 精英火圈预警期间停止移动 —— 这段时间正是玩家走出圈子的窗口
         if (this.novaTelegraph > 0) {
@@ -583,12 +616,22 @@ export class Enemy extends Component {
         const len = Math.max(0.1, moveDir.length());
         moveDir.multiplyScalar(1 / len);
         const pos = this.node.position;
-        const step = this.moveSpeed * dt;
+        // 减速（烈焰环「焚天领域」）只作用于常规移动，不影响冲锋技能速度
+        const step = this.moveSpeed * dt * (this.slowTimer > 0 ? this.slowFactor : 1);
         this.node.setPosition(pos.x + moveDir.x * step, pos.y + moveDir.y * step, pos.z);
     }
 
-    /** 获取追踪目标（Spawner 传入的优先，其次 GameManager，最后按路径查找） */
+    /** 获取追踪目标（残影诱饵 > Spawner 传入 > GameManager > 路径查找） */
     private findTarget(): boolean {
+        // 残影诱饵（流云身法）：范围内的敌人优先扑向残影
+        const decoy = Enemy.decoy;
+        if (decoy && decoy.isValid) {
+            const dd = Vec3.squaredDistance(this.node.worldPosition, decoy.worldPosition);
+            if (dd <= Enemy.DECOY_ATTRACT_RANGE * Enemy.DECOY_ATTRACT_RANGE) {
+                this.target = decoy;
+                return true;
+            }
+        }
         if (this.target && this.target.isValid) return true;
         this.target = GameManager.getInstance().getPlayer(); // 契约：getPlayer(): Node | null
         if (!this.target || !this.target.isValid) {

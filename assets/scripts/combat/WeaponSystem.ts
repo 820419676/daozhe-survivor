@@ -33,6 +33,7 @@ import { Enemy } from '../enemy/Enemy';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
 import { GameManager } from '../core/GameManager';
+import { BuildSystem } from '../progression/BuildSystem';
 
 const { ccclass } = _decorator;
 
@@ -445,7 +446,8 @@ export class WeaponSystem extends Component {
             lifetime: (cfg.duration || 1.5) * this.playerData.duration,
             piercing: true,
             knockback: cfg.knockback,
-            areaRadius: cfg.area * 80,
+            // 流派天赋「焚天领域」：光环范围 +35%
+            areaRadius: cfg.area * 80 * (BuildSystem.hasTalent('flame_domain') ? 1.35 : 1),
             tickInterval: 0.5,
             // 光环结束（到期 / 武器被移除）时清除武器侧引用：
             // 节点是回收到共享对象池的（可能被雷霆符等借走复用），

@@ -10,7 +10,10 @@
  *  - speed 弹幕速度（px/秒）
  *  - cooldown 冷却时间（秒）
  *  - duration 持续时间（秒）
+ *  - buildTag 流派标签（爆发/持续/生存），升级三选一按标签累计流派
  */
+
+import { BuildTag } from '../progression/BuildSystem';
 
 /** 武器类型枚举 */
 export enum WeaponType {
@@ -38,6 +41,8 @@ export interface WeaponConfig {
     evolutionPair: string;  // 进化所需被动id（空串表示不可进化）
     evolutionId: string;    // 进化后武器id（空串表示最终形态）
     targeting: 'nearest' | 'random' | 'frontal' | 'all';
+    /** 流派标签（升级选择时累加，连续 3 次同标签触发流派天赋） */
+    buildTag: BuildTag;
 }
 
 export const WEAPON_CONFIGS: Record<string, WeaponConfig> = {
@@ -49,7 +54,7 @@ export const WEAPON_CONFIGS: Record<string, WeaponConfig> = {
         type: WeaponType.ORBITAL, baseDamage: 15, cooldown: 3, projectileCount: 3,
         area: 1.2, duration: 0, speed: 300, piercing: true, knockback: 0.3,
         evolutionPair: 'taoist_nature', evolutionId: 'eight_trigrams',
-        targeting: 'all'
+        targeting: 'all', buildTag: BuildTag.BURST
     },
     /** 雷霆符 — 随机天雷轰击落点范围伤害 */
     'thunder_talisman': {
@@ -57,7 +62,7 @@ export const WEAPON_CONFIGS: Record<string, WeaponConfig> = {
         type: WeaponType.LIGHTNING, baseDamage: 35, cooldown: 2, projectileCount: 1,
         area: 2, duration: 0.35, speed: 0, piercing: true, knockback: 0.5,
         evolutionPair: 'heavenly_secret', evolutionId: 'nine_heaven_thunder',
-        targeting: 'random'
+        targeting: 'random', buildTag: BuildTag.BURST
     },
     /** 寒冰掌 — 前方扇形冰霜散射，非穿透 */
     'ice_palm': {
@@ -65,7 +70,7 @@ export const WEAPON_CONFIGS: Record<string, WeaponConfig> = {
         type: WeaponType.PROJECTILE, baseDamage: 20, cooldown: 1.5, projectileCount: 5,
         area: 0.8, duration: 0.5, speed: 400, piercing: false, knockback: 0.8,
         evolutionPair: 'spirit_bone', evolutionId: 'absolute_zero',
-        targeting: 'frontal'
+        targeting: 'frontal', buildTag: BuildTag.SUSTAIN
     },
     /** 烈焰环 — 周期性火焰光环（以玩家为中心的范围灼烧） */
     'flame_ring': {
@@ -73,7 +78,7 @@ export const WEAPON_CONFIGS: Record<string, WeaponConfig> = {
         type: WeaponType.AURA, baseDamage: 25, cooldown: 4, projectileCount: 1,
         area: 1.5, duration: 1.5, speed: 0, piercing: true, knockback: 0.2,
         evolutionPair: 'spirit_guard', evolutionId: 'phoenix_rebirth',
-        targeting: 'all'
+        targeting: 'all', buildTag: BuildTag.SUSTAIN
     },
     /** 飞剑术 — 朝最近敌人发射高速贯穿飞剑 */
     'flying_sword': {
@@ -81,7 +86,7 @@ export const WEAPON_CONFIGS: Record<string, WeaponConfig> = {
         type: WeaponType.PIERCING, baseDamage: 30, cooldown: 1, projectileCount: 1,
         area: 0.3, duration: 0, speed: 800, piercing: true, knockback: 0.1,
         evolutionPair: 'taoist_nature', evolutionId: 'thousand_swords',
-        targeting: 'nearest'
+        targeting: 'nearest', buildTag: BuildTag.BURST
     },
     /** 万剑诀 — 全屏剑雨（随机落点，落地范围伤害） */
     'sword_storm': {
@@ -89,7 +94,7 @@ export const WEAPON_CONFIGS: Record<string, WeaponConfig> = {
         type: WeaponType.STORM, baseDamage: 18, cooldown: 6, projectileCount: 20,
         area: 3, duration: 0.3, speed: 600, piercing: false, knockback: 0.3,
         evolutionPair: 'heavenly_secret', evolutionId: 'celestial_sword_rain',
-        targeting: 'random'
+        targeting: 'random', buildTag: BuildTag.SUSTAIN
     },
 
     // ==================== 进化武器（6 把，MVP 内置以保证 checkEvolution 可落地） ====================
@@ -100,7 +105,7 @@ export const WEAPON_CONFIGS: Record<string, WeaponConfig> = {
         type: WeaponType.ORBITAL, baseDamage: 30, cooldown: 2.5, projectileCount: 8,
         area: 1.6, duration: 0, speed: 360, piercing: true, knockback: 0.5,
         evolutionPair: '', evolutionId: '',
-        targeting: 'all'
+        targeting: 'all', buildTag: BuildTag.BURST
     },
     /** 雷霆符 + 天机推演 → 九霄神雷 */
     'nine_heaven_thunder': {
@@ -108,7 +113,7 @@ export const WEAPON_CONFIGS: Record<string, WeaponConfig> = {
         type: WeaponType.LIGHTNING, baseDamage: 80, cooldown: 1.8, projectileCount: 3,
         area: 3, duration: 0.4, speed: 0, piercing: true, knockback: 0.8,
         evolutionPair: '', evolutionId: '',
-        targeting: 'random'
+        targeting: 'random', buildTag: BuildTag.BURST
     },
     /** 寒冰掌 + 仙骨丹 → 绝对零度 */
     'absolute_zero': {
@@ -116,7 +121,7 @@ export const WEAPON_CONFIGS: Record<string, WeaponConfig> = {
         type: WeaponType.PROJECTILE, baseDamage: 45, cooldown: 1.2, projectileCount: 7,
         area: 1.2, duration: 0.8, speed: 520, piercing: false, knockback: 1.2,
         evolutionPair: '', evolutionId: '',
-        targeting: 'frontal'
+        targeting: 'frontal', buildTag: BuildTag.SUSTAIN
     },
     /** 烈焰环 + 灵气护体 → 凤火涅槃 */
     'phoenix_rebirth': {
@@ -124,7 +129,7 @@ export const WEAPON_CONFIGS: Record<string, WeaponConfig> = {
         type: WeaponType.AURA, baseDamage: 55, cooldown: 3, projectileCount: 1,
         area: 2.2, duration: 2.5, speed: 0, piercing: true, knockback: 0.4,
         evolutionPair: '', evolutionId: '',
-        targeting: 'all'
+        targeting: 'all', buildTag: BuildTag.SUSTAIN
     },
     /** 飞剑术 + 道法自然 → 千剑诀 */
     'thousand_swords': {
@@ -132,7 +137,7 @@ export const WEAPON_CONFIGS: Record<string, WeaponConfig> = {
         type: WeaponType.PIERCING, baseDamage: 60, cooldown: 0.7, projectileCount: 3,
         area: 0.4, duration: 0, speed: 950, piercing: true, knockback: 0.2,
         evolutionPair: '', evolutionId: '',
-        targeting: 'nearest'
+        targeting: 'nearest', buildTag: BuildTag.BURST
     },
     /** 万剑诀 + 天机推演 → 天剑雨幕 */
     'celestial_sword_rain': {
@@ -140,7 +145,7 @@ export const WEAPON_CONFIGS: Record<string, WeaponConfig> = {
         type: WeaponType.STORM, baseDamage: 40, cooldown: 4.5, projectileCount: 30,
         area: 4, duration: 0.4, speed: 650, piercing: false, knockback: 0.4,
         evolutionPair: '', evolutionId: '',
-        targeting: 'random'
+        targeting: 'random', buildTag: BuildTag.SUSTAIN
     },
 };
 

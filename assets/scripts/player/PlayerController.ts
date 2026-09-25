@@ -33,6 +33,7 @@ import { GameManager, GameState } from '../core/GameManager';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
 import { GAME_CONFIG } from '../core/GameConfig';
+import { BuildSystem } from '../progression/BuildSystem';
 import { PlayerData } from './PlayerData';
 import { PlayerRegistry } from '../core/PlayerRegistry';
 import { XPSystem } from '../progression/XPSystem';
@@ -97,6 +98,8 @@ export class PlayerController extends Component {
     private touchPos: Vec3 | null = null;
 
     private regenTimer: number = 0;
+    /** 已拾取的灵珠数量（流派天赋「聚灵诀」每 20 颗回血） */
+    private orbCount: number = 0;
 
     private collider: Collider2D | null = null;
     private sprite: Sprite | null = null;
@@ -397,6 +400,11 @@ export class PlayerController extends Component {
         }
         const amount = PlayerController.readPickupAmount(node, 'xpAmount') ?? 1;
         this.collectXp(amount);
+        // 流派天赋「聚灵诀」：每拾取 20 个灵珠恢复 10 HP
+        this.orbCount++;
+        if (BuildSystem.hasTalent('spirit_gather') && this.orbCount % 20 === 0) {
+            this.heal(10);
+        }
         EventBus.emit(GameEvent.XP_PICKED, { node, amount });
         node.destroy();
     }

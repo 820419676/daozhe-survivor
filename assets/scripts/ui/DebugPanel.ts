@@ -22,6 +22,7 @@ import { Enemy } from '../enemy/Enemy';
 import { EnemyType } from '../enemy/EnemyTypes';
 import { DashAbility } from '../player/DashAbility';
 import { LingmaiSystem } from '../progression/LingmaiSystem';
+import { BuildSystem } from '../progression/BuildSystem';
 import { WEAPON_CONFIGS, WeaponType } from '../combat/WeaponData';
 import { hexColor, makeLabel, makePanel } from '../core/UIUtils';
 import { PASSIVE_CONFIGS } from '../combat/PassiveData';
@@ -34,7 +35,7 @@ const REFRESH_INTERVAL = 0.2;
 const MAX_WEAPON_ROWS = 6;
 /** 面板尺寸与行距（底部需给右下角御风步按钮让位，故整体上移） */
 const PANEL_W = 408;
-const PANEL_H = 255;
+const PANEL_H = 272;
 const LINE_GAP = 17;
 /** 面板底边距屏幕底部的距离（= 御风按钮高度 + 间隙） */
 const BOTTOM_OFFSET = 96;
@@ -72,6 +73,8 @@ export class DebugPanel extends Component {
     private hpLabel: Label | null = null;
     /** 系统状态行：御风步冷却 / 在场精英数 / 灵脉状态 */
     private statusLabel: Label | null = null;
+    /** 流派行：标签累计次数 + 已获天赋 */
+    private buildLabel: Label | null = null;
     private stateLabel: Label | null = null;
 
     private kills: number = 0;
@@ -185,6 +188,9 @@ export class DebugPanel extends Component {
             }
             this.statusLabel.string = `Dash ${dashText}   Elite ${eliteCount}   Lingmai ${this.lingmaiText()}`;
         }
+        if (this.buildLabel) {
+            this.buildLabel.string = `Tags: ${BuildSystem.getTagSummary()}  |  天赋: ${BuildSystem.getTalentSummary()}`;
+        }
         if (this.stateLabel) {
             this.stateLabel.string = `State: ${gm ? GameState[gm.state] : '?'}  ${gm ? formatMMSS(gm.elapsedTime) : '00:00'}`;
         }
@@ -222,6 +228,7 @@ export class DebugPanel extends Component {
         this.statsLabel = this.addLine(panel, '', y, '#9BD7A0'); y -= LINE_GAP;
         this.hpLabel = this.addLine(panel, '', y, '#C8D6E0'); y -= LINE_GAP;
         this.statusLabel = this.addLine(panel, '', y, '#F0ABFC'); y -= LINE_GAP;
+        this.buildLabel = this.addLine(panel, '', y, '#FDBA74'); y -= LINE_GAP;
         this.stateLabel = this.addLine(panel, '', y, '#7DD3FC');
 
         this.refresh();

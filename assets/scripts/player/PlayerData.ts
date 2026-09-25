@@ -13,6 +13,7 @@
  */
 
 import { GAME_CONFIG } from '../core/GameConfig';
+import { BuildSystem } from '../progression/BuildSystem';
 
 /** 武器槽位（id 对应武器表，level 为当前等级，满级后可进化超武） */
 export interface WeaponSlot {
@@ -112,7 +113,9 @@ export class PlayerData {
 
     /** 磁吸/拾取半径（基础 110 × 范围倍率；数值收敛在 GameConfig.player.magnetRange） */
     get pickupRange(): number {
-        return GAME_CONFIG.player.magnetRange * this.area;
+        const base = GAME_CONFIG.player.magnetRange * this.area;
+        // 流派天赋「聚灵诀」：灵珠吸附范围翻倍
+        return BuildSystem.hasTalent('spirit_gather') ? base * 2 : base;
     }
 
     /** 基础移动速度（200 × 速度倍率） */
