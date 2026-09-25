@@ -9,8 +9,9 @@
 | 引擎 / 语言 | Cocos Creator 3.8 + TypeScript |
 | 场景架构 | `Canvas + GameEntry` 运行时构建（**不手写 .scene**），UI 与占位美术全部由 `Graphics`/`Label` 代码生成 |
 | 单局时长 | 开发测试 **180 秒**（`DEV_TEST_MODE`，对齐 180 秒六段节奏）；正式版 900 秒试炼 |
-| 当前版本 | 提交 `4ddf7e2` |
-| 数值唯一入口 | `assets/scripts/core/GameConfig.ts`（玩家 / 御风步 / 灵脉 / 精英 / 宝箱 / 问心后台 / 刷怪上限） |
+| 当前版本 | 代码快照 `bc08567`（本文档需随代码同步更新） |
+| 数值唯一入口 | `assets/scripts/core/GameConfig.ts`（玩家 / 御风步 / 灵脉 / 精英 / 宝箱 / 天劫之主 / 问心后台 / 刷怪上限） |
+| 后续规划 | 见 `docs/design-v2-plan.md`（V2 优化方案；含「附录 A：开发前置对齐」，Phase 1 可直接开工） |
 
 ---
 
