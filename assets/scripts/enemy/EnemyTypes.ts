@@ -15,6 +15,7 @@
  *   - 宝箱掉率：普通怪 0.5%，妖王/天劫之主 100%（GDD 4.2.6）
  */
 import { Color } from 'cc';
+import { GAME_CONFIG } from '../core/GameConfig';
 
 /** 敌人类型枚举 */
 export enum EnemyType {
@@ -201,12 +202,13 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
         canShoot: false, // 技能系统后续接入：冲锋 / 放射弹 / 召唤杂鱼
         shootInterval: 0,
         attackInterval: 1.2,
-        // 精英妖王招牌技能：火圈爆发（预警 0.9s → 半径 210 爆发），必须走位躲避
+        // 精英妖王招牌技能：火圈爆发（预警 → 半径内爆发），必须走位躲避
+        // 数值统一来自 core/GameConfig.elite，避免两处配置漂移
         novaSkill: {
-            interval: 6,
-            telegraph: 0.9,
-            radius: 210,
-            damageMultiplier: 2.2,
+            interval: GAME_CONFIG.elite.novaInterval,
+            telegraph: GAME_CONFIG.elite.novaTelegraph,
+            radius: GAME_CONFIG.elite.novaRadius,
+            damageMultiplier: GAME_CONFIG.elite.novaDamageMultiplier,
         },
         isBoss: false,
         chestDropRate: 1, // 100% 掉宝箱（GDD 4.2.6）

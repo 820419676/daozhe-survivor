@@ -27,6 +27,7 @@ import {
 import { GameManager, GameState } from '../core/GameManager';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
+import { GAME_CONFIG } from '../core/GameConfig';
 import { Enemy } from './Enemy';
 import { EnemyType, EnemyConfig, ENEMY_CONFIGS, PhysicsGroups } from './EnemyTypes';
 import { PlayerController } from '../player/PlayerController';
@@ -238,24 +239,36 @@ export class EnemySpawner extends Component {
 
     // ==================== 天劫之主（Boss） ====================
 
+    /**
+     * 天劫之主降临（对局结束前 leadSeconds 秒）。
+     * 血量按模式定标（见 GAME_CONFIG.boss）：
+     *   - 短模式（≤180 秒开发测试）：DPS × shortModeSeconds，约 45 秒全力输出可击杀
+     *     —— 短模式必须打得死，否则最后 60 秒会被一只打不动的怪主导体验；
+     *   - 长模式（15/30 分钟）：DPS × 30 × 20/35，刻意做成"活过终局"的压力型 Boss。
+     */
     private updateBoss(): void {
-        // 2 分钟测试模式无终局 Boss（对局在 120 秒结束，Boss 属于第二阶段内容）
-        if (this.gameEndTime <= 150) {
-            this.bossSpawned = true;
-            return;
-        }
-        const bossTime = this.gameEndTime - 60; // 终局前 1 分钟：900→840s（14:00）/ 1800→1740s（29:00）
+        const bossCfg = GAME_CONFIG.boss;
+        const bossTime = this.gameEndTime - bossCfg.leadSeconds;
         if (this.bossSpawned || this.gameTime < bossTime) return;
         this.bossSpawned = true;
         this.bossActive = true;
 
+        const shortMode = this.gameEndTime <= bossCfg.shortModeMaxDuration;
+        const dps = this.estimatePlayerDps();
+        const hpOverride = shortMode
+            ? Math.round(dps * bossCfg.shortModeSeconds)
+            : Math.round(
+                  dps * bossCfg.longModeSeconds *
+                  (this.gameEndTime >= 1800 ? bossCfg.deepModeFactor : bossCfg.longModeFactor),
+              );
+
         const cfg = ENEMY_CONFIGS[EnemyType.BOSS];
-        // 天劫之主血量 = 玩家预测 30 秒 DPS × 20（炼气试炼）/ ×35（渡劫模式）—— GDD 4.3.7
-        const factor = this.gameEndTime >= 1800 ? 35 : 20;
-        const hpOverride = Math.round(this.estimatePlayerDps() * 30 * factor);
         const boss = this.spawnEnemy(cfg, hpOverride);
         EventBus.emit(GameEvent.BOSS_SPAWNED, { node: boss ? boss.node : null });
-        log(`[Spawner] 天劫降临 @${Math.floor(this.gameTime / 60)}:${String(Math.floor(this.gameTime % 60)).padStart(2, '0')}，血量=${hpOverride}`);
+        log(
+            `[Spawner] 天劫降临 @${Math.floor(this.gameTime / 60)}:${String(Math.floor(this.gameTime % 60)).padStart(2, '0')}` +
+            `，血量=${hpOverride}（${shortMode ? '短模式·可击杀' : '长模式·终局压力'}）`,
+        );
     }
 
     /** 预测玩家 DPS（战力 ≈ 基础 DPS × 1.2^等级，GDD 4.4 玩家曲线） */
