@@ -1,0 +1,24 @@
+Cocos Creator 3.8 场景生成说明
+
+当前项目的游戏场景应保存为：
+
+assets/scenes/main.scene
+
+不要继续使用 assets/Main.scene 作为游戏场景。它只是 Cocos 默认生成的空 3D 场景，只包含 Light 和 Camera。
+
+生成步骤：
+
+1. 用 Cocos Creator 3.8 打开项目。
+2. 在 Creator 里新建一个空场景，或打开任意空场景。
+3. 打开 Developer -> Console。
+4. 打开项目里的 tools/create-main-scene-in-creator.js。
+5. 复制整个脚本内容，粘贴到 Console 并回车。
+6. 看到控制台输出：
+   [daozhe-survivor] Main scene hierarchy generated.
+7. 在 Creator 中保存场景到：
+   assets/scenes/main.scene
+8. 以后打开和预览都使用 assets/scenes/main.scene。
+
+为什么不用 Python 直接写 .scene：
+
+Cocos Creator 的 .scene 文件里，自定义脚本组件需要 Creator 生成正确的组件类型引用。之前脚本用路径 MD5 伪造 UUID，会导致组件引用不可靠。现在改为在 Creator 内部用 addComponent 创建节点和组件，由 Creator 自己保存合法 scene。

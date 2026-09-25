@@ -19,15 +19,19 @@
  * 事件（on）：
  *   - 'PLAYER_DIED'                        玩家死亡 → 清场回收
  */
-import * as cc from 'cc';
+import {
+    _decorator, Component, Node, Vec3, v3, Prefab,
+    NodePool, UITransform, instantiate, find, view, log, warn, Graphics,
+    Sprite, Color, RigidBody2D, ERigidBody2DType, BoxCollider2D, Size,
+} from 'cc';
 import { GameManager, GameState } from '../core/GameManager';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
 import { Enemy } from './Enemy';
-import { EnemyType, EnemyConfig, ENEMY_CONFIGS } from './EnemyTypes';
+import { EnemyType, EnemyConfig, ENEMY_CONFIGS, PhysicsGroups } from './EnemyTypes';
 import { PlayerController } from '../player/PlayerController';
 
-const { ccclass, property } = cc._decorator;
+const { ccclass, property } = _decorator;
 
 /**
  * 波次权重表：按分钟配置敌人类型权重（GDD：每分钟读取配置表决定敌人类型）。
@@ -47,14 +51,14 @@ const WAVE_TABLE: { minute: number; weights: Partial<Record<EnemyType, number>> 
 const PERF_TIERS: number[] = [500, 300, 200];
 
 @ccclass('EnemySpawner')
-export class EnemySpawner extends cc.Component {
+export class EnemySpawner extends Component {
     /** 敌人预制体（节点上需挂载 Enemy 组件 + Collider2D，组设为 ENEMY） */
-    @property({ type: cc.Prefab })
-    enemyPrefab: cc.Prefab = null!;
+    @property({ type: Prefab })
+    enemyPrefab: Prefab = null!;
 
-    /** 玩家节点（编辑器指定；留空则从 GameManager.getPlayer() 或 cc.find 获取） */
-    @property({ type: cc.Node })
-    playerNode: cc.Node = null!;
+    /** 玩家节点（编辑器指定；留空则从 GameManager.getPlayer() 或 find 获取） */
+    @property({ type: Node })
+    playerNode: Node = null!;
 
     /** 初始同屏上限（500；运行中按帧率在 500/300/200 间自动降级/恢复） */
     @property({ tooltip: '初始同屏上限（运行时按帧率在 500/300/200 间降级）' })
@@ -87,7 +91,7 @@ export class EnemySpawner extends cc.Component {
     private gameTime: number = 0;
     private activeEnemies: number = 0;
     private activeElites: number = 0;
-    private enemyPool: cc.NodePool = new cc.NodePool();
+    private enemyPool: NodePool = new NodePool();
 
     private bossSpawned: boolean = false;
     private bossActive: boolean = false; // Boss 在场期间普通刷怪减量
@@ -136,7 +140,9 @@ export class EnemySpawner extends cc.Component {
         }
 
         const minute = Math.floor(this.gameTime / 60);
-        const density = 8 + 2 * minute; // 只/秒（GDD 4.4：峰值约 68 只/s）
+        // MVP 首分钟优先验证“看懂自动战斗”，而非压力测试 JS 性能。
+        // 首发约 2 只/秒，之后逐分钟平缓增加。
+        const density = 2 + 0.5 * minute;
         let batch = Math.max(1, Math.round(density * this.spawnInterval));
         if (this.bossActive) batch = Math.max(1, Math.round(batch * 0.3)); // 天劫之战期间减量，聚焦 Boss
         batch = Math.min(batch, Math.max(0, cap - this.activeEnemies));
@@ -186,7 +192,7 @@ export class EnemySpawner extends cc.Component {
         const hpOverride = Math.round(this.estimatePlayerDps() * 30 * factor);
         const boss = this.spawnEnemy(cfg, hpOverride);
         EventBus.emit(GameEvent.BOSS_SPAWNED, { node: boss ? boss.node : null });
-        cc.log(`[Spawner] 天劫降临 @${Math.floor(this.gameTime / 60)}:${String(Math.floor(this.gameTime % 60)).padStart(2, '0')}，血量=${hpOverride}`);
+        log(`[Spawner] 天劫降临 @${Math.floor(this.gameTime / 60)}:${String(Math.floor(this.gameTime % 60)).padStart(2, '0')}，血量=${hpOverride}`);
     }
 
     /** 预测玩家 DPS（战力 ≈ 基础 DPS × 1.2^等级，GDD 4.4 玩家曲线） */
@@ -205,15 +211,14 @@ export class EnemySpawner extends cc.Component {
      * @param hpOverride Boss 血量覆盖（按玩家 DPS 动态定标）
      */
     private spawnEnemy(config: EnemyConfig, hpOverride?: number): Enemy | null {
-        if (!this.enemyPrefab) {
-            cc.warnOnce('[Spawner] 未设置 enemyPrefab 属性');
-            return null;
-        }
-        let node: cc.Node;
+        let node: Node;
         if (this.enemyPool.size() > 0) {
             node = this.enemyPool.get()!;
+        } else if (this.enemyPrefab) {
+            node = instantiate(this.enemyPrefab);
         } else {
-            node = cc.instantiate(this.enemyPrefab);
+            warn('[Spawner] 未设置 enemyPrefab 属性，使用程序化敌人节点兜底');
+            node = this.createFallbackEnemyNode();
         }
         const enemy = node.getComponent(Enemy) ?? node.addComponent(Enemy);
         node.parent = this.node;
@@ -226,6 +231,24 @@ export class EnemySpawner extends cc.Component {
         if (config.type === EnemyType.ELITE) this.activeElites++;
         EventBus.emit(GameEvent.ENEMY_SPAWNED, { type: config.type, node });
         return enemy;
+    }
+
+    /** 无 enemyPrefab 时的开发期兜底，保证生成场景可直接预览。 */
+    private createFallbackEnemyNode(): Node {
+        const node = new Node('Enemy');
+        const ui = node.addComponent(UITransform);
+        ui.setContentSize(38, 38);
+        const graphics = node.addComponent(Graphics);
+        graphics.fillColor = new Color(210, 70, 70, 255);
+        graphics.circle(0, 0, 18);
+        graphics.fill();
+        const body = node.addComponent(RigidBody2D);
+        body.type = ERigidBody2DType.Kinematic;
+        const collider = node.addComponent(BoxCollider2D);
+        collider.size = new Size(38, 38);
+        collider.group = PhysicsGroups.ENEMY;
+        node.addComponent(Enemy);
+        return node;
     }
 
     /**
@@ -255,38 +278,38 @@ export class EnemySpawner extends cc.Component {
     }
 
     /** 屏幕外随机出生点（玩家当前视口外 120px 的圆周上，并限制在地图边界内） */
-    private getSpawnPosition(): cc.Vec3 {
-        const visible = cc.view.getVisibleSize();
+    private getSpawnPosition(): Vec3 {
+        const visible = view.getVisibleSize();
         const margin = 120;
         const radius = Math.max(visible.width, visible.height) / 2 + margin;
         const angle = Math.random() * Math.PI * 2;
-        const dir = cc.v3(Math.cos(angle), Math.sin(angle), 0);
+        const dir = v3(Math.cos(angle), Math.sin(angle), 0);
 
         const player = this.getPlayerNode();
         const base = this.toSpawnerLocal(player);
         const x = Math.min(Math.max(base.x + dir.x * radius, -this.mapHalfWidth), this.mapHalfWidth);
         const y = Math.min(Math.max(base.y + dir.y * radius, -this.mapHalfHeight), this.mapHalfHeight);
-        return cc.v3(x, y, 0);
+        return v3(x, y, 0);
     }
 
     /** 将玩家世界坐标换算为生成器本地坐标（敌人节点是生成器的子节点） */
-    private toSpawnerLocal(player: cc.Node | null): cc.Vec3 {
-        if (!player) return cc.v3();
+    private toSpawnerLocal(player: Node | null): Vec3 {
+        if (!player) return v3();
         // 同父节点时直接使用玩家本地坐标（常见布局：Player 与 Spawner 同为 Canvas 子节点）
         if (this.node.parent && player.parent === this.node.parent) {
             return player.position.clone();
         }
-        const ui = this.node.parent ? this.node.parent.getComponent(cc.UITransform) : null;
+        const ui = this.node.parent ? this.node.parent.getComponent(UITransform) : null;
         if (ui) return ui.convertToNodeSpaceAR(player.worldPosition);
         return player.worldPosition.clone();
     }
 
-    /** 获取玩家节点（属性指定 → GameManager → cc.find 兜底） */
-    private getPlayerNode(): cc.Node | null {
+    /** 获取玩家节点（属性指定 → GameManager → find 兜底） */
+    private getPlayerNode(): Node | null {
         if (this.playerNode && this.playerNode.isValid) return this.playerNode;
         const p = GameManager.getInstance().getPlayer();
         if (p && p.isValid) return p;
-        return cc.find('Canvas/Player');
+        return find('Canvas/Player');
     }
 
     // ==================== 性能分级（500 → 300 → 200） ====================
@@ -313,7 +336,7 @@ export class EnemySpawner extends cc.Component {
         if (avg < 30) {
             if (this.perfTier < PERF_TIERS.length - 1) {
                 this.perfTier++;
-                cc.log(`[Spawner] 帧率不足（${avg.toFixed(0)}fps），同屏上限降级至 ${PERF_TIERS[this.perfTier]}`);
+                log(`[Spawner] 帧率不足（${avg.toFixed(0)}fps），同屏上限降级至 ${PERF_TIERS[this.perfTier]}`);
             }
             this.fpsHighTimer = 0;
         } else if (avg > 50) {
@@ -321,7 +344,7 @@ export class EnemySpawner extends cc.Component {
             if (this.fpsHighTimer >= 10 && this.perfTier > 0) {
                 this.perfTier--;
                 this.fpsHighTimer = 0;
-                cc.log(`[Spawner] 帧率充裕（${avg.toFixed(0)}fps），同屏上限恢复至 ${PERF_TIERS[this.perfTier]}`);
+                log(`[Spawner] 帧率充裕（${avg.toFixed(0)}fps），同屏上限恢复至 ${PERF_TIERS[this.perfTier]}`);
             }
         } else {
             this.fpsHighTimer = 0;

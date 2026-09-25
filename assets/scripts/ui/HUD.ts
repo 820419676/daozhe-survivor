@@ -68,6 +68,7 @@ const MAX_PASSIVE_SLOTS = 4;
 interface SlotView {
     root: Node;
     gfx: Graphics;
+    symbol: Label;
     level: Label;
 }
 
@@ -335,9 +336,9 @@ export class HUD extends Component {
                 const cfg = WEAPON_CONFIGS[w.id];
                 const isEvolved = !!cfg && cfg.evolutionId === '';
                 const color = isEvolved ? COLOR_EVOLVED : (WEAPON_ICON_COLORS[w.id] ?? COLOR_UNKNOWN);
-                this.paintSlot(slot, color, true, String(w.level));
+                this.paintSlot(slot, color, true, w.name.charAt(0), String(w.level));
             } else {
-                this.paintSlot(slot, '#333333', false, '');
+                this.paintSlot(slot, '#333333', false, '', '');
             }
         }
 
@@ -346,14 +347,14 @@ export class HUD extends Component {
             if (!slot) continue;
             if (i < passives.length) {
                 const p = passives[i];
-                this.paintSlot(slot, PASSIVE_ICON_COLORS[p.id] ?? COLOR_UNKNOWN, true, String(p.level));
+                this.paintSlot(slot, PASSIVE_ICON_COLORS[p.id] ?? COLOR_UNKNOWN, true, '诀', String(p.level));
             } else {
-                this.paintSlot(slot, '#333333', false, '');
+                this.paintSlot(slot, '#333333', false, '', '');
             }
         }
     }
 
-    private paintSlot(slot: SlotView, colorHex: string, active: boolean, levelText: string) {
+    private paintSlot(slot: SlotView, colorHex: string, active: boolean, symbolText: string, levelText: string) {
         slot.root.active = active;
         if (!active) return;
         const g = slot.gfx;
@@ -361,6 +362,7 @@ export class HUD extends Component {
         g.fillColor = hexColor(colorHex);
         g.roundRect(-17, -17, 34, 34, 6);
         g.fill();
+        slot.symbol.string = symbolText;
         slot.level.string = levelText;
     }
 
@@ -465,10 +467,14 @@ export class HUD extends Component {
     private createSlot(parent: Node, colorHex: string): SlotView {
         const root = makePanel(parent, 34, 34, hexColor(colorHex), 6);
         const gfx = root.getComponent(Graphics)!;
+        const symbol = makeLabel(root, '', 18, '#102018', 24, 24);
+        symbol.node.setPosition(-2, 1, 0);
+        symbol.horizontalAlign = Label.HorizontalAlign.CENTER;
+        symbol.verticalAlign = Label.VerticalAlign.CENTER;
         const level = makeLabel(root, '', 12, '#FFFFFF', 22, 18);
         level.node.setPosition(9, -9, 0);
         level.horizontalAlign = Label.HorizontalAlign.RIGHT;
         level.verticalAlign = Label.VerticalAlign.BOTTOM;
-        return { root, gfx, level };
+        return { root, gfx, symbol, level };
     }
 }

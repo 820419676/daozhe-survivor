@@ -16,13 +16,16 @@
  *   - 'DROP_CHEST'      { position, quality }                宝箱掉落（normal/legendary）
  *   - 'BOSS_PHASE_TWO'  { node }                             天劫之主半血狂暴
  */
-import * as cc from 'cc';
+import {
+    _decorator, Component, Node, Vec3, v3, Sprite, Color,
+    Prefab, UITransform, find, warn, instantiate, Graphics,
+} from 'cc';
 import { GameManager, GameState } from '../core/GameManager';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
 import { EnemyType, EnemyConfig } from './EnemyTypes';
 
-const { ccclass, property } = cc._decorator;
+const { ccclass, property } = _decorator;
 
 /**
  * Spawner 句柄（结构化类型，避免 Enemy ↔ Spawner 互相 import 造成循环依赖）。
@@ -33,10 +36,10 @@ export interface EnemySpawnerHandle {
 }
 
 @ccclass('Enemy')
-export class Enemy extends cc.Component {
+export class Enemy extends Component {
     /** 远程弹幕预制体（散修/天劫之主使用；可留空，留空则不发射） */
-    @property({ type: cc.Prefab, tooltip: '远程弹幕预制体（散修/天劫之主使用，可留空）' })
-    bulletPrefab: cc.Prefab = null!;
+    @property({ type: Prefab, tooltip: '远程弹幕预制体（散修/天劫之主使用，可留空）' })
+    bulletPrefab: Prefab = null!;
 
     /** 与玩家距离超过该值自动回收（对象池归还） */
     @property({ tooltip: '与玩家距离超过该值自动回收' })
@@ -46,7 +49,7 @@ export class Enemy extends cc.Component {
 
     private config: EnemyConfig | null = null;
     private spawner: EnemySpawnerHandle | null = null;
-    private target: cc.Node | null = null;
+    private target: Node | null = null;
 
     private hp: number = 0;
     private maxHp: number = 0;
@@ -55,15 +58,15 @@ export class Enemy extends cc.Component {
     private knockResistance: number = 0;
 
     /** 击退速度（指数阻尼衰减） */
-    private knockbackVel: cc.Vec3 = cc.v3();
+    private knockbackVel: Vec3 = v3();
     /** 风筝怪的横移相位 */
     private strafePhase: number = 0;
 
     /** 弹幕计时器 */
     private shootTimer: number = 0;
     /** 场上属于自己的弹幕（移动/生命周期） */
-    private bullets: cc.Node[] = [];
-    private bulletVels: cc.Vec3[] = [];
+    private bullets: Node[] = [];
+    private bulletVels: Vec3[] = [];
     private bulletLife: number[] = [];
 
     /** 已回收标记（防重复回收/重复回调） */
@@ -73,8 +76,8 @@ export class Enemy extends cc.Component {
     /** Boss 二阶段（半血狂暴） */
     private bossPhaseTwo: boolean = false;
 
-    private sprite: cc.Sprite | null = null;
-    private baseColor: cc.Color | null = null;
+    private sprite: Sprite | null = null;
+    private baseColor: Color | null = null;
 
     // ==================== 战斗系统共享注册表（增量接入） ====================
 
@@ -130,11 +133,29 @@ export class Enemy extends cc.Component {
         // —— 显示重置 ——
         this.node.active = true;
         this.node.setScale(1, 1, 1);
-        const ui = this.node.getComponent(cc.UITransform);
+        const ui = this.node.getComponent(UITransform);
         if (ui) ui.setContentSize(config.size, config.size); // 体型
-        this.sprite = this.getComponent(cc.Sprite);
+        this.sprite = this.getComponent(Sprite);
         this.baseColor = config.color;
         if (this.sprite) this.sprite.color = config.color;   // 按类型染色
+        const graphics = this.getComponent(Graphics);
+        if (graphics) {
+            graphics.clear();
+            graphics.fillColor = config.color;
+            // 菱形妖物轮廓，避免与玩家、经验灵珠同为圆形而难以辨识。
+            const r = config.size / 2;
+            graphics.moveTo(0, r);
+            graphics.lineTo(r, 0);
+            graphics.lineTo(0, -r);
+            graphics.lineTo(-r, 0);
+            graphics.close();
+            graphics.fill();
+            graphics.fillColor = new Color(255, 245, 245, 255);
+            graphics.circle(-r * 0.24, r * 0.1, Math.max(2, r * 0.12));
+            graphics.circle(r * 0.24, r * 0.1, Math.max(2, r * 0.12));
+            graphics.fill();
+            this.drawHealthBar(graphics);
+        }
 
         // 登记到战斗系统存活注册表（防重入：同一实例不重复登记）
         if (Enemy.alive.indexOf(this) < 0) Enemy.alive.push(this);
@@ -146,7 +167,7 @@ export class Enemy extends cc.Component {
     }
 
     /** 设置追踪目标（由 Spawner 传入玩家节点；未设置时自动查找） */
-    public setTarget(node: cc.Node | null): void {
+    public setTarget(node: Node | null): void {
         this.target = node;
     }
 
@@ -192,28 +213,28 @@ export class Enemy extends cc.Component {
 
         const cfg = this.config!;
         const isKiter = cfg.canShoot && cfg.type !== EnemyType.BOSS; // 散修风筝；Boss 贴脸追击
-        let moveDir: cc.Vec3;
+        let moveDir: Vec3;
 
         if (isKiter) {
             // 散修：保持 260px 攻击距离（太近后撤，太远靠近）+ 正弦横移走位
             const desired = 260;
             const radial = dist > desired + 40 ? 1 : dist < desired - 60 ? -1 : 0;
-            const dir = cc.v3(dx / dist, dy / dist, 0);
-            const perp = cc.v3(-dir.y, dir.x, 0);
+            const dir = v3(dx / dist, dy / dist, 0);
+            const perp = v3(-dir.y, dir.x, 0);
             this.strafePhase += dt * 1.5;
-            moveDir = cc.v3(
+            moveDir = v3(
                 dir.x * radial + perp.x * Math.sin(this.strafePhase) * 0.6,
                 dir.y * radial + perp.y * Math.sin(this.strafePhase) * 0.6,
                 0
             );
         } else {
             // 小妖/妖王/天劫之主：直线追击（Boss 二阶段加一点横移走位）
-            const dir = cc.v3(dx / dist, dy / dist, 0);
+            const dir = v3(dx / dist, dy / dist, 0);
             moveDir = dir.clone();
             if (this.isBoss && this.bossPhaseTwo) {
-                const perp = cc.v3(-dir.y, dir.x, 0);
+                const perp = v3(-dir.y, dir.x, 0);
                 this.strafePhase += dt * 0.8;
-                moveDir = cc.v3(
+                moveDir = v3(
                     dir.x + perp.x * Math.sin(this.strafePhase) * 0.4,
                     dir.y + perp.y * Math.sin(this.strafePhase) * 0.4,
                     0
@@ -231,9 +252,9 @@ export class Enemy extends cc.Component {
     /** 获取追踪目标（Spawner 传入的优先，其次 GameManager，最后按路径查找） */
     private findTarget(): boolean {
         if (this.target && this.target.isValid) return true;
-        this.target = GameManager.getInstance().getPlayer(); // 契约：getPlayer(): cc.Node | null
+        this.target = GameManager.getInstance().getPlayer(); // 契约：getPlayer(): Node | null
         if (!this.target || !this.target.isValid) {
-            this.target = cc.find('Canvas/Player'); // 兜底查找
+            this.target = find('Canvas/Player'); // 兜底查找
         }
         return !!this.target && this.target.isValid;
     }
@@ -264,13 +285,13 @@ export class Enemy extends cc.Component {
     /** 发射一颗弹幕（弹速 320px/s，寿命 3s；弹幕节点需自行配置碰撞体并设置组为 ENEMY_BULLET） */
     private fireBullet(angle: number): void {
         if (!this.bulletPrefab) {
-            cc.warnOnce('[Enemy] 远程敌人缺少 bulletPrefab 属性，弹幕未发射');
+            warn('[Enemy] 远程敌人缺少 bulletPrefab 属性，弹幕未发射');
             return;
         }
-        const bullet = cc.instantiate(this.bulletPrefab);
+        const bullet = instantiate(this.bulletPrefab);
         bullet.setWorldPosition(this.node.worldPosition);
         bullet['bulletDamage'] = this.damage; // PlayerController 碰撞时读取
-        const v = cc.v3(Math.cos(angle), Math.sin(angle), 0).multiplyScalar(320);
+        const v = v3(Math.cos(angle), Math.sin(angle), 0).multiplyScalar(320);
         this.bullets.push(bullet);
         this.bulletVels.push(v);
         this.bulletLife.push(3);
@@ -309,10 +330,12 @@ export class Enemy extends cc.Component {
      * @param amount   伤害数值
      * @param knockDir 击退方向（单位向量），不传则无击退
      */
-    public takeDamage(amount: number, knockDir?: cc.Vec3): void {
+    public takeDamage(amount: number, knockDir?: Vec3): void {
         if (this.recycled || !this.config) return;
         this.hp -= amount;
         this.flashHit(); // 受击闪白
+        const graphics = this.getComponent(Graphics);
+        if (graphics) this.drawHealthBar(graphics);
 
         // 击退（精英/Boss 抗性高）
         if (knockDir && knockDir.lengthSqr() > 0.0001) {
@@ -333,10 +356,24 @@ export class Enemy extends cc.Component {
     /** 受击闪白（0.08s 后恢复基础色） */
     private flashHit(): void {
         if (!this.sprite) return;
-        this.sprite.color = cc.Color.WHITE;
+        this.sprite.color = Color.WHITE;
         this.scheduleOnce(() => {
             if (this.sprite && this.baseColor) this.sprite.color = this.baseColor;
         }, 0.08);
+    }
+
+    /** 在菱形妖物上方补绘一个极简血条，MVP 中让伤害与击杀因果可见。 */
+    private drawHealthBar(graphics: Graphics): void {
+        if (!this.config || this.maxHp <= 0) return;
+        const r = this.config.size / 2;
+        const width = Math.max(26, this.config.size);
+        const ratio = Math.max(0, Math.min(1, this.hp / this.maxHp));
+        graphics.fillColor = new Color(25, 18, 28, 220);
+        graphics.rect(-width / 2, r + 8, width, 5);
+        graphics.fill();
+        graphics.fillColor = new Color(102, 235, 137, 255);
+        graphics.rect(-width / 2, r + 8, width * ratio, 5);
+        graphics.fill();
     }
 
     // ==================== 死亡 / 掉落 / 回收 ====================
@@ -358,7 +395,7 @@ export class Enemy extends cc.Component {
     }
 
     /** 掉落结算（通过事件交给拾取物系统生成宝石/灵石/宝箱） */
-    private rollDrops(pos: cc.Vec3, cfg: EnemyConfig): void {
+    private rollDrops(pos: Vec3, cfg: EnemyConfig): void {
         // XP 宝石（蓝=1 / 紫=5，GDD 4.2.3）
         EventBus.emit(GameEvent.DROP_XP, { position: pos, amount: cfg.xpDrop });
         // 灵石
@@ -388,7 +425,7 @@ export class Enemy extends cc.Component {
     /** 与玩家距离过远 → 静默回收（维持同屏对象数，配合性能分级） */
     private checkDespawn(): void {
         if (!this.target || !this.target.isValid) return;
-        if (cc.Vec3.distance(this.node.worldPosition, this.target.worldPosition) > this.despawnRadius) {
+        if (Vec3.distance(this.node.worldPosition, this.target.worldPosition) > this.despawnRadius) {
             this.recycle();
         }
     }

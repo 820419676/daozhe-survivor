@@ -23,7 +23,11 @@
  * 事件（on）：
  *   - GameEvent.ENEMY_KILLED                                 击杀妖王回血 30
  */
-import * as cc from 'cc';
+import {
+    _decorator, Component, Node, Vec3, Vec2, v3, Sprite, Color,
+    Collider2D, UITransform, Prefab, view, warn,
+    EventTouch, Contact2DType, IPhysics2DContact,
+} from 'cc';
 import { GameManager, GameState } from '../core/GameManager';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
@@ -34,10 +38,10 @@ import { Enemy } from '../enemy/Enemy';
 import { EnemyType, PhysicsGroups } from '../enemy/EnemyTypes';
 import { WeaponSystem } from '../combat/WeaponSystem';
 
-const { ccclass, property } = cc._decorator;
+const { ccclass, property } = _decorator;
 
 @ccclass('PlayerController')
-export class PlayerController extends cc.Component {
+export class PlayerController extends Component {
     /** 基础移动速度（px/s）；实际移速 = speed × data.speed（速度倍率） */
     @property({ tooltip: '基础移动速度（px/s）' })
     speed: number = 200;
@@ -55,7 +59,7 @@ export class PlayerController extends cc.Component {
      * 寒冰掌等前方系武器使用：WeaponSystem.facing（弧度，0 = 正右）
      * 由本属性在每帧移动时派生同步（getComponent(WeaponSystem) 直取）。
      */
-    public facing: cc.Vec3 = cc.v3(1, 0, 0);
+    public facing: Vec3 = v3(1, 0, 0);
 
     /** 地图矩形边界（半宽，以世界原点为中心） */
     @property({ tooltip: '地图半宽（px）' })
@@ -72,7 +76,7 @@ export class PlayerController extends cc.Component {
      *   宝石节点需以属性 xpAmount 标记经验值（与碰撞拾取共用同一读取约定）。
      * 注：为减少单帧开销，后续可换用空间哈希/均匀网格（GDD 9.3 实现要点）。
      */
-    private static xpGems: cc.Node[] = [];
+    private static xpGems: Node[] = [];
 
     private data: PlayerData = new PlayerData();
     private isInvincible: boolean = false;
@@ -82,26 +86,26 @@ export class PlayerController extends cc.Component {
     private xpSystem!: XPSystem;
 
     /** 触摸目标点（Canvas 本地坐标；null 表示未触摸） */
-    private touchPos: cc.Vec3 | null = null;
+    private touchPos: Vec3 | null = null;
 
     private regenTimer: number = 0;
 
-    private collider: cc.Collider2D | null = null;
-    private sprite: cc.Sprite | null = null;
-    private baseColor: cc.Color | null = null;
+    private collider: Collider2D | null = null;
+    private sprite: Sprite | null = null;
+    private baseColor: Color | null = null;
 
     // ==================== 静态注册表 ====================
 
-    public static registerXpGem(node: cc.Node): void {
+    public static registerXpGem(node: Node): void {
         if (!PlayerController.xpGems.includes(node)) PlayerController.xpGems.push(node);
     }
 
-    public static unregisterXpGem(node: cc.Node): void {
+    public static unregisterXpGem(node: Node): void {
         const i = PlayerController.xpGems.indexOf(node);
         if (i >= 0) PlayerController.xpGems.splice(i, 1);
     }
 
-    public static getXpGems(): cc.Node[] {
+    public static getXpGems(): Node[] {
         return PlayerController.xpGems;
     }
 
@@ -116,7 +120,7 @@ export class PlayerController extends cc.Component {
         GameManager.getInstance().setPlayer(this.node);
         this.xpSystem = new XPSystem(this.data);
 
-        this.sprite = this.getComponent(cc.Sprite);
+        this.sprite = this.getComponent(Sprite);
         this.baseColor = this.sprite ? this.sprite.color.clone() : null;
 
         this.initTouch();
@@ -144,19 +148,19 @@ export class PlayerController extends cc.Component {
      */
     private initTouch(): void {
         const touchTarget = this.node.parent ?? this.node;
-        touchTarget.on(cc.Node.EventType.TOUCH_START, this.onTouchStart, this);
-        touchTarget.on(cc.Node.EventType.TOUCH_MOVE, this.onTouchMove, this);
-        touchTarget.on(cc.Node.EventType.TOUCH_END, this.onTouchEnd, this);
-        touchTarget.on(cc.Node.EventType.TOUCH_CANCEL, this.onTouchEnd, this);
+        touchTarget.on(Node.EventType.TOUCH_START, this.onTouchStart, this);
+        touchTarget.on(Node.EventType.TOUCH_MOVE, this.onTouchMove, this);
+        touchTarget.on(Node.EventType.TOUCH_END, this.onTouchEnd, this);
+        touchTarget.on(Node.EventType.TOUCH_CANCEL, this.onTouchEnd, this);
     }
 
-    private onTouchStart(event: cc.EventTouch): void {
+    private onTouchStart(event: EventTouch): void {
         if (this.isDead) return;
         this.touchPos = this.uiToLocal(event.getUILocation());
     }
 
     /** 单指拖拽：移动方向 = 触摸点 - 玩家位置 */
-    private onTouchMove(event: cc.EventTouch): void {
+    private onTouchMove(event: EventTouch): void {
         if (this.isDead) return;
         this.touchPos = this.uiToLocal(event.getUILocation());
     }
@@ -166,15 +170,15 @@ export class PlayerController extends cc.Component {
     }
 
     /** UI 屏幕坐标 → Canvas 本地坐标（适配屏幕缩放/刘海屏） */
-    private uiToLocal(uiPos: cc.Vec2): cc.Vec3 {
+    private uiToLocal(uiPos: Vec2): Vec3 {
         const parent = this.node.parent;
         if (parent) {
-            const uiTrans = parent.getComponent(cc.UITransform);
-            if (uiTrans) return uiTrans.convertToNodeSpaceAR(cc.v3(uiPos.x, uiPos.y, 0));
+            const uiTrans = parent.getComponent(UITransform);
+            if (uiTrans) return uiTrans.convertToNodeSpaceAR(v3(uiPos.x, uiPos.y, 0));
         }
         // 兜底：按屏幕像素中心换算
-        const size = cc.view.getVisibleSize();
-        return cc.v3(uiPos.x - size.width / 2, uiPos.y - size.height / 2, 0);
+        const size = view.getVisibleSize();
+        return v3(uiPos.x - size.width / 2, uiPos.y - size.height / 2, 0);
     }
 
     private handleMovement(dt: number): void {
@@ -192,7 +196,7 @@ export class PlayerController extends cc.Component {
         const ny = dy / dist;
 
         // 更新面朝方向（单位向量）并同步武器系统面朝角（弧度，0 = 正右）
-        this.facing = cc.v3(nx, ny, 0);
+        this.facing = v3(nx, ny, 0);
         const weaponSystem = this.node.getComponent(WeaponSystem);
         if (weaponSystem) weaponSystem.facing = Math.atan2(ny, nx);
 
@@ -221,26 +225,26 @@ export class PlayerController extends cc.Component {
      * 需在项目设置中启用 2D 物理系统。
      */
     private initCollision(): void {
-        this.collider = this.getComponent(cc.Collider2D);
+        this.collider = this.getComponent(Collider2D);
         if (!this.collider) {
-            cc.warnOnce('[Player] 未找到 Collider2D，请为玩家节点添加 BoxCollider2D 并启用 2D 物理');
+            warn('[Player] 未找到 Collider2D，请为玩家节点添加 BoxCollider2D 并启用 2D 物理');
             return;
         }
-        this.collider.setGroup(PhysicsGroups.PLAYER);
-        this.collider.setMask(
-            PhysicsGroups.ENEMY | PhysicsGroups.ENEMY_BULLET | PhysicsGroups.XP_GEM | PhysicsGroups.GOLD
-        );
-        this.collider.on(cc.Contact2DType.BEGIN_CONTACT, this.onCollisionEnter, this);
+        // Cocos Creator 3.8 的 Collider2D 使用 `group` 属性；
+        // setGroup/setMask 是旧版本或 3D 物理组件的 API。
+        // 碰撞掩码由 Project Settings 的 2D collision matrix 统一管理。
+        this.collider.group = PhysicsGroups.PLAYER;
+        this.collider.on(Contact2DType.BEGIN_CONTACT, this.onCollisionEnter, this);
     }
 
     private onCollisionEnter(
-        selfCollider: cc.Collider2D,
-        otherCollider: cc.Collider2D,
-        contact: cc.IPhysics2DContact | null
+        selfCollider: Collider2D,
+        otherCollider: Collider2D,
+        contact: IPhysics2DContact | null
     ): void {
         if (this.isDead) return;
         const other = otherCollider.node;
-        const group = otherCollider.getGroup();
+        const group = otherCollider.group;
 
         if (group === PhysicsGroups.ENEMY) {
             // 与敌人碰撞：扣血（无敌帧由 takeDamage 内部处理）
@@ -329,7 +333,7 @@ export class PlayerController extends cc.Component {
     /** 受击闪白 0.1s */
     private flashHit(): void {
         if (!this.sprite) return;
-        this.sprite.color = cc.Color.WHITE;
+        this.sprite.color = Color.WHITE;
         this.scheduleOnce(() => {
             if (this.sprite && this.baseColor) this.sprite.color = this.baseColor;
         }, 0.1);

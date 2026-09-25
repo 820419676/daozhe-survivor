@@ -12,8 +12,9 @@
 // 或直接调用 MapManager.clampToBounds 统一边界。
 // ============================================================
 
-import { _decorator, Component, Graphics, Color, Vec3 } from 'cc';
+import { _decorator, Component, Graphics, Color, Node, Vec3 } from 'cc';
 import { hexColor } from '../core/UIUtils';
+import { GameEntry } from '../core/GameEntry';
 
 const { ccclass, property } = _decorator;
 
@@ -68,6 +69,14 @@ export class MapManager extends Component {
         this.node.setPosition(0, 0, 0);
         if (this.node.parent) this.node.setSiblingIndex(0);
         this.drawBackground();
+
+        // 场景已经能显示地图却遗漏启动器时，自动补齐 MVP 入口。
+        // 这样旧的手工场景也无需再逐个挂载 HUD、刷怪器与战斗系统。
+        const canvas = this.node.parent;
+        if (canvas && !canvas.getComponent(GameEntry)) {
+            console.log('[MapManager] GameEntry missing; adding MVP bootstrap automatically.');
+            canvas.addComponent(GameEntry);
+        }
     }
 
     onDestroy() {

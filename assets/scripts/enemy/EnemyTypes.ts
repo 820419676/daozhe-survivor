@@ -14,7 +14,7 @@
  *     由 EnemySpawner 在生成时动态计算并覆盖 hp 字段
  *   - 宝箱掉率：普通怪 0.5%，妖王/天劫之主 100%（GDD 4.2.6）
  */
-import * as cc from 'cc';
+import { Color } from 'cc';
 
 /** 敌人类型枚举 */
 export enum EnemyType {
@@ -47,7 +47,7 @@ export interface EnemyConfig {
     /** 碰撞/显示尺寸（px） */
     size: number;
     /** 形象颜色（区分类型，预制体共用时按类型染色） */
-    color: cc.Color;
+    color: Color;
     /** 是否远程弹幕 */
     canShoot: boolean;
     /** 弹幕发射间隔（秒） */
@@ -72,7 +72,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
         xpDrop: 1,       // 蓝宝石 = 1 点经验
         goldDrop: 1,
         size: 24,
-        color: new cc.Color(139, 157, 195), // 灰蓝
+        color: new Color(225, 88, 112), // 赤红，首屏可与玩家/灵珠明确区分
         canShoot: false,
         shootInterval: 0,
         isBoss: false,
@@ -90,7 +90,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
         xpDrop: 2,
         goldDrop: 2,
         size: 26,
-        color: new cc.Color(156, 116, 214), // 紫
+        color: new Color(156, 116, 214), // 紫
         canShoot: true,
         shootInterval: 2.4,
         isBoss: false,
@@ -108,7 +108,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
         xpDrop: 5,       // 紫宝石 = 5 点经验
         goldDrop: 25,
         size: 60,
-        color: new cc.Color(196, 62, 62), // 猩红
+        color: new Color(196, 62, 62), // 猩红
         canShoot: false, // 技能系统后续接入：冲锋 / 放射弹 / 召唤杂鱼
         shootInterval: 0,
         isBoss: false,
@@ -126,7 +126,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
         xpDrop: 200,     // 大量经验
         goldDrop: 300,
         size: 140,
-        color: new cc.Color(92, 44, 148), // 暗紫（雷劫意象）
+        color: new Color(92, 44, 148), // 暗紫（雷劫意象）
         canShoot: true,
         shootInterval: 1.1, // 8 向弹幕，P2 狂暴后 ×0.6
         isBoss: true,

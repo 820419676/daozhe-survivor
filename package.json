@@ -1,11 +1,12 @@
 {
   "name": "daozhe-survivor",
   "version": "0.1.0",
-  "description": "问道幸存者 - 修仙割草微信小游戏",
+  "description": "Daozhe Survivor xianxia action game",
   "creator": {
     "version": "3.8.0"
   },
   "dependencies": {
     "typescript": "5.4"
-  }
+  },
+  "uuid": "4542a699-107f-4579-9a65-691a11f248da"
 }

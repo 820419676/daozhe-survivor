@@ -14,3 +14,8 @@ build/
 .cocos/
 node_modules/
 .tscheck/
+.creator/
+
+# 重新导入前的备份目录（Cocos 生成，体积大）
+*.pre-reimport-backup-*/
+
