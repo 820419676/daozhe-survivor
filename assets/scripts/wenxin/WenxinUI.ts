@@ -53,6 +53,9 @@ export class WenxinUI extends Component {
     private slipLabel: Label | null = null;    // 飞出的签文
     private bannerLabel: Label | null = null;  // 揭晓横幅
     private audioSource: AudioSource | null = null;
+    /** 可选问心按钮（击败精英获得次数；挂在 UI 层，本组件节点隐藏时依然可用） */
+    private optionalButton: Node | null = null;
+    private optionalButtonLabel: Label | null = null;
 
     private selectedTier: WenxinTier | null = null;
     private decisionTimer: number = WENXIN_DECISION_WINDOW;
@@ -64,16 +67,40 @@ export class WenxinUI extends Component {
 
     // —— 事件回调（框架 EventBus 不绑定 this，必须用箭头函数保持引用稳定） ——
     private handleWenxinTrigger = () => { this.onWenxinTrigger(); };
+    private handleOptional = () => { this.refreshOptionalButton(); };
 
     onLoad() {
-        EventBus.getInstance().on(GameEvent.WENXIN_TRIGGER, this.handleWenxinTrigger);
+        const bus = EventBus.getInstance();
+        bus.on(GameEvent.WENXIN_TRIGGER, this.handleWenxinTrigger);
+        bus.on(GameEvent.WENXIN_OPTIONAL, this.handleOptional);
         this.buildUI();
+        this.refreshOptionalButton();
         this.node.active = false;
     }
 
     onDestroy() {
-        EventBus.getInstance().off(GameEvent.WENXIN_TRIGGER, this.handleWenxinTrigger);
+        const bus = EventBus.getInstance();
+        bus.off(GameEvent.WENXIN_TRIGGER, this.handleWenxinTrigger);
+        bus.off(GameEvent.WENXIN_OPTIONAL, this.handleOptional);
         Tween.stopAllByTarget(this.node);
+    }
+
+    /** 可选问心按钮：持有次数时显示（击败精英获得） */
+    private refreshOptionalButton(): void {
+        const btn = this.optionalButton;
+        if (!btn || !btn.isValid) return;
+        const charges = WenxinManager.getInstance()?.getOptionalCharges() ?? 0;
+        btn.active = charges > 0;
+        if (this.optionalButtonLabel && charges > 0) {
+            this.optionalButtonLabel.string = `问心 ×${charges}`;
+        }
+    }
+
+    private onOptionalWenxin(): void {
+        const wm = WenxinManager.getInstance();
+        if (!wm) return;
+        wm.consumeOptionalWenxin(); // 内部广播 WENXIN_TRIGGER → 本组件弹出面板
+        this.refreshOptionalButton();
     }
 
     update(dt: number) {
@@ -167,11 +194,23 @@ export class WenxinUI extends Component {
 
             if (title) title.string = TIER_NAMES[tier];
             if (stars) stars.string = '★'.repeat(display.starCount);
-            if (slogan) slogan.string = display.slogan;
             const color = hexColor(display.color);
             if (title) title.color = color;
             if (stars) stars.color = color;
-            if (slogan) slogan.color = hexColor('#FFFFFF', 220);
+
+            // 明码标价：奖励（成功得到什么）与风险（失败会发生什么）——
+            // 问心是构筑风险决策，因此这里必须写清后果（仍不显示任何概率数字）
+            if (slogan) {
+                slogan.string = `奖励：${display.rewardText}`;
+                slogan.color = hexColor('#BBF7D0');
+            }
+            const risk = btn.getChildByName('Risk')?.getComponent(Label);
+            if (risk) {
+                risk.string = display.riskText === '无风险'
+                    ? '风险：无'
+                    : `风险：${display.riskText}`;
+                risk.color = display.riskText === '无风险' ? hexColor('#86EFAC') : hexColor('#FCA5A5');
+            }
 
             // "天将眷顾"预兆：连败 3 次起天问档浮现金光征兆（半公开保底，GDD 4.3.9）
             if (blessTag) {
@@ -371,7 +410,12 @@ export class WenxinUI extends Component {
 
             const slogan = makeLabel(btn, display.slogan, 22, '#FFFFFF', 460, 34);
             slogan.node.name = 'Slogan';
-            slogan.node.setPosition(0, -24, 0);
+            slogan.node.setPosition(0, -6, 0);
+
+            // 风险文案（成功奖励在上方 Slogan 位，此处显示失败后果）
+            const risk = makeLabel(btn, '', 19, '#FCA5A5', 480, 30);
+            risk.node.name = 'Risk';
+            risk.node.setPosition(0, -36, 0);
 
             // "天将眷顾"预兆标签（默认隐藏）
             const tag = makeLabel(btn, '⚡ 天将眷顾', 20, '#FFD700', 200, 36);
@@ -409,6 +453,19 @@ export class WenxinUI extends Component {
 
             this.resultPanel = panel;
             panel.active = false;
+        }
+
+        // —— 可选问心按钮（击败精英获得次数；挂 UI 层，本组件节点隐藏时仍可用） ——
+        if (!this.optionalButton) {
+            const host = this.node.parent ?? this.node;
+            const btn = makeButton(host, 200, 78, '问心 ×1', 24, '#7C3AED',
+                () => this.onOptionalWenxin(), '#F5F3FF');
+            btn.name = 'OptionalWenxinButton';
+            const vsize = view.getVisibleSize();
+            btn.setPosition(-vsize.width / 2 + 124, -vsize.height / 2 + 92, 0);
+            btn.active = false;
+            this.optionalButton = btn;
+            this.optionalButtonLabel = btn.getComponentInChildren(Label);
         }
 
         // —— 音频源（可选，无资源时静默） ——

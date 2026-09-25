@@ -112,8 +112,22 @@ export class EnemySpawner extends Component {
 
     onLoad(): void {
         EventBus.on(GameEvent.PLAYER_DIED, this.onPlayerDied, this);
+        EventBus.on(GameEvent.ELITE_SUMMON, this.onEliteSummon, this);
         this.spawnTimer = 0.5;      // 开局 0.5s 后开始刷怪
         // eliteTimer 在 updateElite 首次运行时惰性初始化（见 eliteTimerInit）
+    }
+
+    /** 立刻降临一只精英妖王（问心天问失败时由 Rewards 广播请求） */
+    private onEliteSummon(): void {
+        this.spawnEliteNow();
+    }
+
+    /** 立即生成一只精英妖王（并广播"妖王来袭"） */
+    public spawnEliteNow(): void {
+        const gm = GameManager.getInstance();
+        if (gm && gm.state !== GameState.PLAYING) return;
+        this.spawnEnemy(ENEMY_CONFIGS[EnemyType.ELITE]);
+        EventBus.emit(GameEvent.ELITE_WARNING, { gameTime: this.gameTime });
     }
 
     update(dt: number): void {
@@ -128,6 +142,7 @@ export class EnemySpawner extends Component {
 
     onDestroy(): void {
         EventBus.off(GameEvent.PLAYER_DIED, this.onPlayerDied, this);
+        EventBus.off(GameEvent.ELITE_SUMMON, this.onEliteSummon, this);
         this.enemyPool.clear();
     }
 

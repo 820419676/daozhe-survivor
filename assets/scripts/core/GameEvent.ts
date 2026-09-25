@@ -99,6 +99,10 @@ export enum GameEvent {
     TALENT_GAINED = 'talent_gained',
     /** 问心结算的战斗后果（{ tier, success, effect }，横幅"问心功成/未竟"） */
     WENXIN_OUTCOME = 'wenxin_outcome',
+    /** 击败精英后获得一次可选问心（{ charges }，WenxinUI 显示"问心"按钮） */
+    WENXIN_OPTIONAL = 'wenxin_optional',
+    /** 请求立刻降临一只精英（问心天问失败；由 EnemySpawner 订阅执行） */
+    ELITE_SUMMON = 'elite_summon',
 
     // —— 经验系统 ——
     /** 经验入账（XPSystem 广播，{ amount }） */

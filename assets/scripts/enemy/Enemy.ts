@@ -142,6 +142,25 @@ export class Enemy extends Component {
         if (Enemy.decoy === node) Enemy.decoy = null;
     }
 
+    // —— 全局移速增益（问心搏问失败：敌人移速 +20%，持续 10 秒） ——
+    private static speedBuffMultiplier: number = 1;
+    private static speedBuffUntil: number = 0;
+
+    /** 施加全局敌人移速增益（取当前时间点 + 持续秒数；不叠加、覆盖式） */
+    public static applyGlobalSpeedBuff(multiplier: number, seconds: number): void {
+        const gm = GameManager.getInstance();
+        const now = gm ? gm.elapsedTime : 0;
+        Enemy.speedBuffMultiplier = multiplier;
+        Enemy.speedBuffUntil = now + seconds;
+    }
+
+    /** 当前全局移速倍率（过期自动恢复 1） */
+    private static getSpeedBuff(): number {
+        const gm = GameManager.getInstance();
+        const now = gm ? gm.elapsedTime : 0;
+        return now < Enemy.speedBuffUntil ? Enemy.speedBuffMultiplier : 1;
+    }
+
     /** 施加减速（取更强的一次，不叠加） */
     public applySlow(seconds: number, factor: number): void {
         if (this.recycled || this.dying) return;
@@ -616,8 +635,10 @@ export class Enemy extends Component {
         const len = Math.max(0.1, moveDir.length());
         moveDir.multiplyScalar(1 / len);
         const pos = this.node.position;
-        // 减速（烈焰环「焚天领域」）只作用于常规移动，不影响冲锋技能速度
-        const step = this.moveSpeed * dt * (this.slowTimer > 0 ? this.slowFactor : 1);
+        // 减速（烈焰环「焚天领域」）与全局移速增益（问心搏问失败）只作用于常规移动，
+        // 不影响冲锋技能速度
+        const slow = this.slowTimer > 0 ? this.slowFactor : 1;
+        const step = this.moveSpeed * dt * slow * Enemy.getSpeedBuff();
         this.node.setPosition(pos.x + moveDir.x * step, pos.y + moveDir.y * step, pos.z);
     }
 

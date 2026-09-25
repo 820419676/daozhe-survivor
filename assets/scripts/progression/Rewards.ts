@@ -18,6 +18,9 @@ import { WeaponSystem } from '../combat/WeaponSystem';
 import { PASSIVE_CONFIGS } from '../combat/PassiveData';
 import { MAX_PASSIVE_LEVEL, MAX_WEAPON_LEVEL } from '../progression/EvolutionSystem';
 import { DashAbility } from '../player/DashAbility';
+import { Enemy } from '../enemy/Enemy';
+import { BuildSystem, TALENTS } from './BuildSystem';
+import { WenxinTier } from '../wenxin/WenxinData';
 
 /** 本局"灵脉奖励翻倍"倍率（宝箱选项；1 = 未翻倍，上限 ×4） */
 let lingmaiMultiplier: number = 1;
@@ -152,5 +155,68 @@ export class Rewards {
         // 3) 全满兜底
         this.grantWeaponDamage();
         return false;
+    }
+
+    // ==================== 问心的构筑后果（阶段 4） ====================
+
+    /**
+     * 问心结算的战斗后果 —— 成功/失败都必须立刻改变战斗画面，而不是只弹文字。
+     *   稳问：无负面；当前最高等级武器 +1
+     *   搏问：成功 → 随机武器进化进度 +2；失败 → 本局 10 秒敌人移速 +20%
+     *   天问：成功 → 获得一个流派天赋；失败 → 立刻降临一只妖王
+     * 失败永不扣除已有武器 / 等级 / 灵石（只制造短暂战斗压力）。
+     * @returns 结算文案（横幅与揭晓演出使用）
+     */
+    static applyWenxin(tier: WenxinTier, success: boolean): string {
+        switch (tier) {
+            case WenxinTier.STABLE: {
+                const upgraded = this.grantWeaponUpgrade();
+                return upgraded ? '问心功成 · 最高等级武器 +1' : '问心功成 · 武器伤害 +15%';
+            }
+            case WenxinTier.VENTURE: {
+                if (success) {
+                    const upgraded = this.grantRandomWeaponLevels(2);
+                    return upgraded ? '问心功成 · 随机武器 +2 级' : '问心功成 · 武器伤害 +30%';
+                }
+                Enemy.applyGlobalSpeedBuff(1.2, 10);
+                return '问心未竟 · 敌人移速 +20%（10 秒）';
+            }
+            case WenxinTier.HEAVEN: {
+                if (success) {
+                    const name = this.grantRandomTalent();
+                    return name ? `问心功成 · 流派天赋「${name}」` : '问心功成 · 武器伤害 +30%';
+                }
+                // 失败：立刻降临一只妖王（走事件，避免 Rewards ↔ EnemySpawner 直接耦合）
+                EventBus.emit(GameEvent.ELITE_SUMMON, { reason: 'wenxin_heaven_fail' });
+                return '问心未竟 · 妖王降临';
+            }
+            default:
+                return '';
+        }
+    }
+
+    /** 随机一把未满级武器 +N 级（搏问成功："进化进度 +2"） */
+    static grantRandomWeaponLevels(levels: number): boolean {
+        const pd = PlayerRegistry.getPlayer();
+        const player = find('Canvas/Player');
+        const weapons = player ? player.getComponent(WeaponSystem) : null;
+        if (!pd || !weapons || pd.weapons.length === 0) return false;
+
+        const upgradable = pd.weapons.filter((w) => w.level < MAX_WEAPON_LEVEL);
+        if (upgradable.length === 0) return false;
+        const pick = upgradable[Math.floor(Math.random() * upgradable.length)];
+        weapons.upgradeWeapon(pick.id, levels);
+        return true;
+    }
+
+    /** 随机获得一个未持有的流派天赋（天问成功）；返回天赋名 */
+    static grantRandomTalent(): string | null {
+        const candidates = Object.keys(TALENTS).filter((id) => !BuildSystem.hasTalent(id));
+        if (candidates.length === 0) return null;
+        const id = candidates[Math.floor(Math.random() * candidates.length)];
+        BuildSystem.grantTalent(id);
+        const def = TALENTS[id];
+        if (def) EventBus.emit(GameEvent.TALENT_GAINED, { talentId: id, name: def.name });
+        return def ? def.name : null;
     }
 }

@@ -8,19 +8,19 @@
 /** 调试 UI（右下角可玩状态面板）：正式版改为 false 即可整体关闭 */
 export const DEBUG_UI = true;
 
-/** 2 分钟测试模式（仅开发环境）：开局时长 120 秒、跳过问心、无终局 Boss */
-export const TEST_2MIN_MODE = true;
+/** 开发测试模式（仅开发环境）：时长 180 秒，正好覆盖完整六段循环（含 90 秒问心） */
+export const DEV_TEST_MODE = true;
 
 export const GAME_CONFIG = {
-    /** 模式时长（秒）：试炼15分钟 / 深度30分钟 / 极速10分钟 / 2分钟开发测试 */
-    modes: { trial: 900, deep: 1800, speed: 600, test2Min: 120 },
+    /** 模式时长（秒）：试炼15分钟 / 深度30分钟 / 极速10分钟 / 开发测试3分钟 */
+    modes: { trial: 900, deep: 1800, speed: 600, test2Min: 180 },
 
     /** 开发 / 调试开关 */
     debug: {
-        /** 右下角可玩状态调试面板（Enemies/Kills/XP/Weapon/State） */
+        /** 右下角可玩状态调试面板（Enemies/Kills/XP/Weapon/State/流派） */
         debugUi: DEBUG_UI,
-        /** 2 分钟测试模式（验证完整循环用；正式版置 false 恢复 15 分钟试炼） */
-        test2Minute: TEST_2MIN_MODE,
+        /** 3 分钟测试模式（验证完整循环用；正式版置 false 恢复 15 分钟试炼） */
+        test2Minute: DEV_TEST_MODE,
     },
 
     /** 问心系统配置 */

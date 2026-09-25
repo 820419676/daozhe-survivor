@@ -25,6 +25,8 @@ import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
 import { GameManager, GameState, PauseReason } from '../core/GameManager';
 import { PlayerRegistry } from '../core/PlayerRegistry';
+import { EnemyType } from '../enemy/EnemyTypes';
+import { Rewards } from '../progression/Rewards';
 import {
     WENXIN_BACKEND,
     WenxinContext,
@@ -76,10 +78,13 @@ export class WenxinManager extends Component {
     /** 敌人击杀时间戳窗口（密度统计用） */
     private killTimes: number[] = [];
 
+    /** 可选问心次数（击败精英妖王获得一次，玩家自行决定何时使用） */
+    private optionalCharges: number = 0;
+
     // —— 事件回调（框架 EventBus 不绑定 this，必须用箭头函数保持引用稳定） ——
     private handleGameStart = () => { this.reset(); };
     private handleWenxinTriggered = () => { this.onWenxinTriggered(); };
-    private handleEnemyKilled = () => { this.onEnemyKilled(); };
+    private handleEnemyKilled = (payload?: { type?: EnemyType }) => { this.onEnemyKilled(payload); };
 
     onLoad() {
         WenxinManager._instance = this;
@@ -140,8 +145,8 @@ export class WenxinManager extends Component {
         }
     }
 
-    /** 敌人密度统计：击杀事件入窗 */
-    private onEnemyKilled() {
+    /** 敌人密度统计：击杀事件入窗；击杀精英额外获得一次"可选问心" */
+    private onEnemyKilled(payload?: { type?: EnemyType }) {
         const gm = GameManager.getInstance();
         const now = gm ? gm.elapsedTime : 0;
         this.killTimes.push(now);
@@ -149,6 +154,37 @@ export class WenxinManager extends Component {
         while (this.killTimes.length > 0 && this.killTimes[0] < now - DENSITY_WINDOW) {
             this.killTimes.shift();
         }
+        // 击败精英妖王 → 一次可选问心（不强制弹出，由玩家点按钮决定何时问）
+        if (payload && payload.type === EnemyType.ELITE) {
+            this.optionalCharges++;
+            EventBus.getInstance().emit(GameEvent.WENXIN_OPTIONAL, { charges: this.optionalCharges });
+        }
+    }
+
+    /** 当前可选问心次数 */
+    public getOptionalCharges(): number {
+        return this.optionalCharges;
+    }
+
+    /**
+     * 消耗一次"可选问心"并立即触发。返回是否成功触发。
+     * 仅在 PLAYING 且无其它暂停时可触发（与固定轮问心共用同一套流程）。
+     */
+    public consumeOptionalWenxin(): boolean {
+        if (this.optionalCharges <= 0) return false;
+        const gm = GameManager.getInstance();
+        if (!gm || gm.state !== GameState.PLAYING) return false;
+        const context: WenxinContext = {
+            playerLevel: 1,
+            currentXpMultiplier: this.currentMultiplier,
+            consecutiveWins: this.consecutiveWins,
+            consecutiveLosses: this.consecutiveLosses,
+            enemyDensity: this.getEnemyDensity(),
+        };
+        if (!this.triggerWenxin(context)) return false;
+        this.optionalCharges--;
+        EventBus.getInstance().emit(GameEvent.WENXIN_OPTIONAL, { charges: this.optionalCharges });
+        return true;
     }
 
     // ============================================================
@@ -257,6 +293,16 @@ export class WenxinManager extends Component {
 
         this.inProgress = false;
 
+        // —— 构筑后果（阶段 4）：问心必须立刻改变战斗画面，而不是只弹文字 ——
+        // 稳问=武器+1；搏问成功=随机武器+2 级 / 失败=敌人 10 秒移速 +20%；
+        // 天问成功=流派天赋 / 失败=立刻降临妖王。失败永不扣除已有武器/等级/灵石。
+        const outcomeText = Rewards.applyWenxin(tier, success);
+        EventBus.getInstance().emit(GameEvent.WENXIN_OUTCOME, {
+            tier,
+            success,
+            text: success ? `问心功成 · ${outcomeText.replace(/^问心功成 · /, '')}` : outcomeText,
+        });
+
         const result: WenxinResult = {
             tier,
             success,
@@ -352,5 +398,7 @@ export class WenxinManager extends Component {
         this.forceSuccessNext = false;
         this.forceFailNext = false;
         this.killTimes = [];
+        this.optionalCharges = 0;
+        EventBus.getInstance().emit(GameEvent.WENXIN_OPTIONAL, { charges: 0 });
     }
 }

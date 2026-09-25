@@ -51,18 +51,34 @@ export const WENXIN_BACKEND: Record<WenxinTier, WenxinBackendParams> = {
 /** 问心决策倒计时（秒），超时默认稳问（收敛在 GAME_CONFIG.wenxin.decisionWindow） */
 export const WENXIN_DECISION_WINDOW = GAME_CONFIG.wenxin.decisionWindow;
 
-/** 前端展示（给 UI 用）：星级 / 签文文案 / 显示颜色 */
+/** 前端展示（给 UI 用）：星级 / 签文文案 / 显示颜色 / 奖励与风险说明 */
 export interface WenxinFrontendDisplay {
     tier: WenxinTier;
     starCount: number;   // 星级（5/3/1）
     slogan: string;      // 签文文案
     color: string;       // 显示颜色
+    /** 奖励文案（成功时获得什么 —— 问心是构筑决策，必须明码标价） */
+    rewardText: string;
+    /** 风险文案（失败时会发生什么；稳问为"无风险"） */
+    riskText: string;
 }
 
 export const WENXIN_FRONTEND: Record<WenxinTier, WenxinFrontendDisplay> = {
-    [WenxinTier.STABLE]:  { tier: WenxinTier.STABLE,  starCount: 5, slogan: '天道酬勤，十拿九稳', color: '#4CAF50' },
-    [WenxinTier.VENTURE]: { tier: WenxinTier.VENTURE, starCount: 3, slogan: '富贵险中求', color: '#FF9800' },
-    [WenxinTier.HEAVEN]:  { tier: WenxinTier.HEAVEN,  starCount: 1, slogan: '逆天改命，九死一生', color: '#F44336' },
+    [WenxinTier.STABLE]: {
+        tier: WenxinTier.STABLE, starCount: 5, slogan: '天道酬勤，十拿九稳', color: '#4CAF50',
+        rewardText: '当前最高等级武器 +1',
+        riskText: '无风险',
+    },
+    [WenxinTier.VENTURE]: {
+        tier: WenxinTier.VENTURE, starCount: 3, slogan: '富贵险中求', color: '#FF9800',
+        rewardText: '随机武器进化进度 +2',
+        riskText: '失败：敌人移速 +20%（10 秒）',
+    },
+    [WenxinTier.HEAVEN]: {
+        tier: WenxinTier.HEAVEN, starCount: 1, slogan: '逆天改命，九死一生', color: '#F44336',
+        rewardText: '获得一个流派天赋',
+        riskText: '失败：立刻降临一只妖王',
+    },
 };
 
 /** 档位名称（前台展示用） */

@@ -132,7 +132,7 @@ export class GameEntry extends Component {
         // 2 分钟测试模式（无终局 Boss，精英提前到 60 秒）
         const testMode = GAME_CONFIG.debug.test2Minute;
         spawnerComp.maxEnemies = GAME_CONFIG.screen.maxEnemies;
-        spawnerComp.gameEndTime = testMode ? GameMode.TEST_2MIN : GameMode.TRIAL_15;
+        spawnerComp.gameEndTime = testMode ? GameMode.TEST_DEV : GameMode.TRIAL_15;
         spawnerComp.mapHalfWidth = 950;
         spawnerComp.mapHalfHeight = 950;
         // 精英妖王：每 45 秒一只，首次即第 45 秒（P1 验收节奏）
