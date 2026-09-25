@@ -6,7 +6,6 @@ import {
     Label, Node, Size, UITransform, view, log, warn, UIOpacity, tween,
 } from 'cc';
 import { EventBus } from './EventBus';
-import { GameEvent } from './GameEvent';
 import { GameManager, GameMode } from './GameManager';
 import { GAME_CONFIG } from './GameConfig';
 import { WenxinManager } from '../wenxin/WenxinManager';
@@ -27,6 +26,7 @@ import { DashAbility } from '../player/DashAbility';
 import { LingmaiSystem } from '../progression/LingmaiSystem';
 import { ChestSystem } from '../progression/ChestSystem';
 import { RewardPanel } from '../progression/RewardPanel';
+import { StarterLoadout } from '../progression/StarterLoadout';
 
 const { ccclass } = _decorator;
 
@@ -52,22 +52,10 @@ export class GameEntry extends Component {
 
     start(): void {
         EventBus.emit('GAME_ENTRY_READY');
-        // PlayerController 的 onLoad 已完成，下一帧赠送首把武器，确保开局立即有战斗反馈。
-        this.scheduleOnce(() => this.addStarterWeapon(), 0);
-        // 新一局同样要发初始武器：复位会把武器槽清空，否则重开后
-        // 玩家没有武器 → 打不死敌人 → 永远升不了级（死局）。
-        EventBus.getInstance().on(GameEvent.GAME_START, this.onGameStart);
+        // 初始武器由 StarterLoadout 在 GAME_START 后弹出"六选一"面板发放
+        // （首局与新一局统一走该入口，避免重开后没有武器的死局）
         log('[GameEntry] Startup complete.');
     }
-
-    onDestroy(): void {
-        EventBus.getInstance().off(GameEvent.GAME_START, this.onGameStart);
-    }
-
-    private onGameStart = (): void => {
-        // 延后一帧：确保各系统的 GAME_START 复位（含清空武器槽）已经执行完
-        this.scheduleOnce(() => this.addStarterWeapon(), 0);
-    };
 
     private bootstrapMvpScene(): void {
         const canvas = this.node.name === 'Canvas' ? this.node : (this.node.parent ?? find('Canvas'));
@@ -171,8 +159,10 @@ export class GameEntry extends Component {
         this.ensureComponent(uiRoot, 'Banner', Banner);
         // 御风步（唯一主动技能：右下角按钮 + 冲刺位移/无敌/击退）
         this.ensureComponent(uiRoot, 'DashAbility', DashAbility);
-        // 通用三选一奖励面板（灵脉 / 宝箱共用；独立暂停原因，不与升级面板互相干扰）
+        // 通用三选一奖励面板（灵脉 / 宝箱 / 流派天赋 / 开局选武器共用）
         this.ensureComponent(uiRoot, 'RewardPanel', RewardPanel);
+        // 开局武器选择（首局与"再来一局"统一入口）
+        this.ensureComponent(uiRoot, 'StarterLoadout', StarterLoadout);
         // 可玩状态调试面板（仅开发环境；GAME_CONFIG.debug.debugUi / DEBUG_UI 常量关闭）
         if (GAME_CONFIG.debug.debugUi) {
             this.ensureComponent(uiRoot, 'DebugPanel', DebugPanel);
@@ -203,17 +193,6 @@ export class GameEntry extends Component {
         if (node) node.active = false;
     }
 
-    private addStarterWeapon(): void {
-        const canvas = this.node.name === 'Canvas' ? this.node : this.node.parent;
-        const player = canvas?.getChildByName('Player');
-        const weapons = player?.getComponent(WeaponSystem);
-        if (weapons && weapons.playerData.weapons.length === 0) {
-            // 3 把常驻环绕飞剑比瞬时弹道更适合首屏教学：玩家一眼能看懂“自动战斗”。
-            weapons.addWeapon('sword_array');
-            log('[GameEntry] Starter weapon added: sword_array');
-        }
-    }
-
     private ensureChild(parent: Node, name: string): Node {
         const existing = parent.getChildByName(name);
         if (existing) return existing;
@@ -236,7 +215,8 @@ export class GameEntry extends Component {
             node.addComponent(Label);
         }
         const label = node.getComponent(Label)!;
-        label.string = '拖拽移动 · 飞剑自动斩妖 · 拾取蓝色灵珠升级';
+        // 初始武器改为开局自选后，引导文案不再特指飞剑（六把武器通用）
+        label.string = '拖拽移动 · 武器自动攻击 · 拾取蓝色灵珠升级';
         label.fontSize = 20;
         label.lineHeight = 30;
         label.color = new Color(210, 232, 240, 235);
