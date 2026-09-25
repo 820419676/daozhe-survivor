@@ -71,13 +71,13 @@ export class PlayerController extends Component {
     mapHalfHeight: number = 950;
 
     /**
-     * XP 宝石注册表（由拾取物系统维护）：
-     *   生成宝石时调用 PlayerController.registerXpGem(node)，
-     *   回收/拾取时调用 unregisterXpGem(node)；
-     *   宝石节点需以属性 xpAmount 标记经验值（与碰撞拾取共用同一读取约定）。
+     * 磁吸拾取注册表（由拾取物系统维护）：
+     *   经验灵珠调用 registerXpGem(node)（节点以 xpAmount 标记经验值），
+     *   灵石调用 registerGold(node)（节点以 goldAmount 标记金额）；
+     *   两者共用同一套磁吸/收集逻辑，拾取时按标记属性分流结算。
      * 注：为减少单帧开销，后续可换用空间哈希/均匀网格（GDD 9.3 实现要点）。
      */
-    private static xpGems: Node[] = [];
+    private static pickups: Node[] = [];
 
     private data: PlayerData = new PlayerData();
     private isInvincible: boolean = false;
@@ -102,17 +102,34 @@ export class PlayerController extends Component {
 
     // ==================== 静态注册表 ====================
 
+    private static registerPickup(node: Node): void {
+        if (!PlayerController.pickups.includes(node)) PlayerController.pickups.push(node);
+    }
+
+    /** 注销拾取物（拾取/销毁时调用；磁吸循环亦会清理失效节点） */
+    public static unregisterPickup(node: Node): void {
+        const i = PlayerController.pickups.indexOf(node);
+        if (i >= 0) PlayerController.pickups.splice(i, 1);
+    }
+
+    /** 注册经验灵珠（节点需带 xpAmount 属性） */
     public static registerXpGem(node: Node): void {
-        if (!PlayerController.xpGems.includes(node)) PlayerController.xpGems.push(node);
+        PlayerController.registerPickup(node);
     }
 
+    /** 注册灵石（节点需带 goldAmount 属性） */
+    public static registerGold(node: Node): void {
+        PlayerController.registerPickup(node);
+    }
+
+    /** 兼容旧调用名，等价于 unregisterPickup */
     public static unregisterXpGem(node: Node): void {
-        const i = PlayerController.xpGems.indexOf(node);
-        if (i >= 0) PlayerController.xpGems.splice(i, 1);
+        PlayerController.unregisterPickup(node);
     }
 
+    /** 当前在场拾取物（通用磁吸列表） */
     public static getXpGems(): Node[] {
-        return PlayerController.xpGems;
+        return PlayerController.pickups;
     }
 
     // ==================== 生命周期 ====================
@@ -286,15 +303,15 @@ export class PlayerController extends Component {
     // ==================== XP 磁吸 ====================
 
     /**
-     * 每帧检查磁吸范围内的 XP 宝石：
-     *   - pickupRange（80 × 范围倍率）内：向玩家吸附（吸附速度 450px/s）
+     * 每帧检查磁吸范围内的拾取物（经验灵珠 / 灵石）：
+     *   - pickupRange（magnetRange × 范围倍率）内：向玩家吸附（吸附速度 450px/s）
      *   - 极近距离（14px）内：直接收集（无碰撞体时的兜底拾取）
      */
     private magnetPickup(dt: number): void {
         const radius = this.data.pickupRange; // = magnetRange × area（范围倍率）
         const collectRadius = 14;
         const myPos = this.node.worldPosition;
-        const gems = PlayerController.xpGems;
+        const gems = PlayerController.pickups;
 
         for (let i = gems.length - 1; i >= 0; i--) {
             const gem = gems[i];
@@ -311,17 +328,39 @@ export class PlayerController extends Component {
             const dist = Math.sqrt(distSq);
             if (dist <= collectRadius) {
                 // 直接收集
-                const amount: number = gem['xpAmount'] ?? 1;
                 gems.splice(i, 1);
-                this.collectXp(amount);
-                EventBus.emit(GameEvent.XP_PICKED, { node: gem, amount });
-                gem.destroy();
+                this.collectPickup(gem);
             } else {
                 // 向玩家吸附（每帧移动 450px/s）
                 const pull = 450 * dt;
                 gem.setWorldPosition(gemPos.x + (dx / dist) * pull, gemPos.y + (dy / dist) * pull, gemPos.z);
             }
         }
+    }
+
+    /**
+     * 拾取结算（按标记属性分流）：
+     *   goldAmount → 灵石入账（吃贪婪倍率）并广播 GOLD_PICKED（HUD 灵石刷新）
+     *   xpAmount   → 经验入账（XPSystem）并广播 XP_PICKED（"+N 灵气"飘字）
+     */
+    private collectPickup(node: Node): void {
+        const gold = PlayerController.readPickupAmount(node, 'goldAmount');
+        if (gold !== undefined) {
+            this.data.gold += Math.round(gold * this.data.greed);
+            EventBus.emit(GameEvent.GOLD_PICKED, { node, amount: gold });
+            node.destroy();
+            return;
+        }
+        const amount = PlayerController.readPickupAmount(node, 'xpAmount') ?? 1;
+        this.collectXp(amount);
+        EventBus.emit(GameEvent.XP_PICKED, { node, amount });
+        node.destroy();
+    }
+
+    /** 读取掉落物上的标记数值（节点以动态属性承载掉落金额，避免 any 索引） */
+    private static readPickupAmount(node: Node, key: 'xpAmount' | 'goldAmount'): number | undefined {
+        const bag = node as unknown as Record<string, number | undefined>;
+        return bag[key];
     }
 
     // ==================== 伤害 / 死亡 ====================
