@@ -74,6 +74,28 @@ export enum GameEvent {
     /** 武器开火（{ id, name, level }；DebugPanel 统计释放次数、排查"只释放一次"类问题） */
     WEAPON_FIRED = 'weapon_fired',
 
+    // —— 主动技能：御风步 ——
+    /** 御风步冲刺开始（{ direction }）；期间玩家无敌 */
+    DASH_STARTED = 'dash_started',
+    /** 御风步冲刺结束（{ passed }：本次穿过的敌人数量） */
+    DASH_ENDED = 'dash_ended',
+    /** 御风步冷却完毕（按钮发光提示） */
+    DASH_READY = 'dash_ready',
+
+    // —— 地图事件（灵脉 / 精英 / 流派天赋 / 问心结果，供横幅与 DebugPanel 使用） ——
+    /** 灵脉现世（{ position, duration }） */
+    LINGMAI_SPAWNED = 'lingmai_spawned',
+    /** 灵脉被采走（{ reward }） */
+    LINGMAI_COLLECTED = 'lingmai_collected',
+    /** 灵脉超时消失 */
+    LINGMAI_EXPIRED = 'lingmai_expired',
+    /** 精英妖王来袭（{ node }，顶部横幅"妖王来袭"） */
+    ELITE_WARNING = 'elite_warning',
+    /** 获得流派天赋（{ talentId, name }，横幅"流派天赋：X"） */
+    TALENT_GAINED = 'talent_gained',
+    /** 问心结算的战斗后果（{ tier, success, effect }，横幅"问心功成/未竟"） */
+    WENXIN_OUTCOME = 'wenxin_outcome',
+
     // —— 经验系统 ——
     /** 经验入账（XPSystem 广播，{ amount }） */
     XP_COLLECTED = 'xp_collected',

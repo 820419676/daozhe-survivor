@@ -18,14 +18,34 @@ import { Color } from 'cc';
 
 /** 敌人类型枚举 */
 export enum EnemyType {
-    /** 小妖：近战追踪 */
+    /** 小妖：近战追踪（红色菱形，炮灰主力） */
     BASIC = 'basic',
-    /** 散修：远程弹幕 */
+    /** 分裂小妖：血量低，死亡分裂为 2 个子体（浅红小菱形） */
+    SPLITTER = 'splitter',
+    /** 散修：远程弹幕，保持距离风筝（紫色三角形） */
     RANGED = 'ranged',
+    /** 冲锋妖兽：预警线 → 高速直线冲锋 → 撞墙/未命中后眩晕（橙红六边形） */
+    CHARGE = 'charge',
     /** 妖王：精英（高HP/光环/宝箱掉落） */
     ELITE = 'elite',
     /** 天劫之主：Boss（终局九重天劫） */
     BOSS = 'boss',
+}
+
+/** 冲锋技能参数（冲锋妖兽专属；让玩家必须观察与走位） */
+export interface ChargeSkillConfig {
+    /** 冷却（秒）：每该时间锁定一次玩家当前位置 */
+    interval: number;
+    /** 预警时长（秒）：红色预警线显示时间，玩家据此走位 */
+    telegraph: number;
+    /** 冲锋速度（px/s） */
+    speed: number;
+    /** 最大冲锋距离（px；未命中且未撞墙时按此结束） */
+    maxDistance: number;
+    /** 冲锋结束后的眩晕时长（秒；眩晕期间承受双倍伤害） */
+    stun: number;
+    /** 预警线宽度（px） */
+    warningWidth: number;
 }
 
 /** 敌人配置（数值为时间 0 时的基础值，生成时按游戏时间缩放） */
@@ -54,6 +74,10 @@ export interface EnemyConfig {
     shootInterval: number;
     /** 接触攻击间隔（秒；贴身后每隔该时间造成一次伤害，实际频率受玩家无敌帧限制） */
     attackInterval: number;
+    /** 分裂参数（分裂小妖：死亡后分裂为 N 个子体，子体不再分裂；省略/0 = 不分裂） */
+    splitsInto?: number;
+    /** 冲锋技能参数（冲锋妖兽专属；省略 = 无冲锋技能） */
+    chargeSkill?: ChargeSkillConfig;
     /** 是否 Boss */
     isBoss: boolean;
     /** 宝箱掉落率（0~1；普通 0.5%，精英/Boss 100%） */
@@ -81,6 +105,53 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
         isBoss: false,
         chestDropRate: 0.005, // 0.5%
         knockResistance: 0,
+    },
+
+    // ---------------- 分裂小妖（低血量，死亡分裂，高收益但扩大包围圈） ----------------
+    [EnemyType.SPLITTER]: {
+        type: EnemyType.SPLITTER,
+        displayName: '分裂小妖',
+        hp: 10,          // 血量低，容易被清掉——但清掉之后会变两只
+        damage: 4,
+        speed: 100,
+        xpDrop: 2,       // 合计收益高于普通妖（本体 2 + 两个子体各 1）
+        goldDrop: 2,
+        size: 22,
+        color: new Color(255, 156, 156), // 浅红（与赤红普通妖区分）
+        canShoot: false,
+        shootInterval: 0,
+        attackInterval: 1.0,
+        splitsInto: 2,   // 死亡 → 2 个子体（子体不再分裂）
+        isBoss: false,
+        chestDropRate: 0.005,
+        knockResistance: 0,
+    },
+
+    // ---------------- 冲锋妖兽（60 秒后登场：预警 → 冲锋 → 眩晕可反击） ----------------
+    [EnemyType.CHARGE]: {
+        type: EnemyType.CHARGE,
+        displayName: '冲锋妖兽',
+        hp: 60,
+        damage: 8,
+        speed: 70,       // 平时慢速逼近
+        xpDrop: 3,
+        goldDrop: 6,
+        size: 34,
+        color: new Color(255, 132, 60), // 橙红六边形（体型大于普通妖的 24）
+        canShoot: false,
+        shootInterval: 0,
+        attackInterval: 1.0,
+        chargeSkill: {
+            interval: 7,        // 每 7 秒锁定一次玩家位置
+            telegraph: 0.7,     // 红色预警线 0.7 秒
+            speed: 700,         // 冲锋速度
+            maxDistance: 620,   // 最大冲锋距离
+            stun: 1.0,          // 撞墙/未命中后眩晕 1 秒（承伤 ×2）
+            warningWidth: 46,   // 预警线宽度
+        },
+        isBoss: false,
+        chestDropRate: 0.01,
+        knockResistance: 0.35, // 体型厚重，不易被击退
     },
 
     // ---------------- 散修（远程弹幕，风筝怪） ----------------

@@ -36,15 +36,16 @@ const { ccclass, property } = _decorator;
 /**
  * 波次权重表：按分钟配置敌人类型权重（GDD：每分钟读取配置表决定敌人类型）。
  * 表项按 minute 递增排列，查询时取最后一个不大于当前分钟的配置。
- * 前期以小妖（近战）为主，散修（远程）随时间逐渐增多。
+ * 首分钟配比（验收口径）：普通妖 70% / 分裂小妖 20% / 远程散修 10%；
+ * 第 60 秒起冲锋妖兽登场（有预警、可躲避、撞墙可反打）。
  */
 const WAVE_TABLE: { minute: number; weights: Partial<Record<EnemyType, number>> }[] = [
-    { minute: 0, weights: { [EnemyType.BASIC]: 10 } },                                  // 0~1 分钟：纯小妖教学波
-    { minute: 1, weights: { [EnemyType.BASIC]: 9, [EnemyType.RANGED]: 1 } },            // 1~2 分钟：散修登场
-    { minute: 2, weights: { [EnemyType.BASIC]: 7, [EnemyType.RANGED]: 3 } },
-    { minute: 4, weights: { [EnemyType.BASIC]: 6, [EnemyType.RANGED]: 4 } },
-    { minute: 7, weights: { [EnemyType.BASIC]: 5, [EnemyType.RANGED]: 5 } },
-    { minute: 11, weights: { [EnemyType.BASIC]: 4, [EnemyType.RANGED]: 6 } },           // 11 分钟后：弹幕海
+    { minute: 0, weights: { [EnemyType.BASIC]: 70, [EnemyType.SPLITTER]: 20, [EnemyType.RANGED]: 10 } },
+    { minute: 1, weights: { [EnemyType.BASIC]: 52, [EnemyType.SPLITTER]: 15, [EnemyType.RANGED]: 15, [EnemyType.CHARGE]: 18 } },
+    { minute: 2, weights: { [EnemyType.BASIC]: 45, [EnemyType.SPLITTER]: 15, [EnemyType.RANGED]: 18, [EnemyType.CHARGE]: 22 } },
+    { minute: 4, weights: { [EnemyType.BASIC]: 38, [EnemyType.SPLITTER]: 14, [EnemyType.RANGED]: 22, [EnemyType.CHARGE]: 26 } },
+    { minute: 7, weights: { [EnemyType.BASIC]: 32, [EnemyType.SPLITTER]: 12, [EnemyType.RANGED]: 26, [EnemyType.CHARGE]: 30 } },
+    { minute: 11, weights: { [EnemyType.BASIC]: 26, [EnemyType.SPLITTER]: 10, [EnemyType.RANGED]: 30, [EnemyType.CHARGE]: 34 } },
 ];
 
 /** 性能分级：同屏敌人上限（500 → 300 → 200），依帧率实测切换 */
@@ -229,9 +230,11 @@ export class EnemySpawner extends Component {
 
     /**
      * 生成一只敌人（优先对象池复用）。
-     * @param hpOverride Boss 血量覆盖（按玩家 DPS 动态定标）
+     * @param hpOverride   Boss 血量覆盖（按玩家 DPS 动态定标）
+     * @param at           指定世界坐标出生（分裂子体用）；省略则按常规屏幕外环形出生
+     * @param isSplitChild 是否为分裂子体（子体不再分裂）
      */
-    private spawnEnemy(config: EnemyConfig, hpOverride?: number): Enemy | null {
+    private spawnEnemy(config: EnemyConfig, hpOverride?: number, at?: Vec3, isSplitChild: boolean = false): Enemy | null {
         let node: Node;
         if (this.enemyPool.size() > 0) {
             node = this.enemyPool.get()!;
@@ -243,8 +246,8 @@ export class EnemySpawner extends Component {
         }
         const enemy = node.getComponent(Enemy) ?? node.addComponent(Enemy);
         node.parent = this.node;
-        node.setPosition(this.getSpawnPosition());
-        enemy.init(config, this, this.gameTime / 60, hpOverride);
+        node.setPosition(at ? this.worldToSpawnerLocal(at) : this.getSpawnPosition());
+        enemy.init(config, this, this.gameTime / 60, hpOverride, isSplitChild);
         enemy.setTarget(this.getPlayerNode());
         node.active = true;
 
@@ -252,6 +255,41 @@ export class EnemySpawner extends Component {
         if (config.type === EnemyType.ELITE) this.activeElites++;
         EventBus.emit(GameEvent.ENEMY_SPAWNED, { type: config.type, node });
         return enemy;
+    }
+
+    /**
+     * 分裂小妖的子体生成（Enemy.die 调用）：
+     * 血量/体型/伤害衰减、速度略快、不再分裂；两个子体各掉 1 颗灵珠，
+     * 使分裂小妖的合计收益高于普通妖 —— 高收益与包围圈扩大的取舍由此成立。
+     */
+    public spawnSplitChildren(config: EnemyConfig, position: Vec3, count: number): void {
+        for (let i = 0; i < count; i++) {
+            const child: EnemyConfig = {
+                ...config,
+                displayName: `${config.displayName}·子体`,
+                hp: Math.max(3, Math.round(config.hp * 0.4)),
+                damage: Math.max(1, Math.round(config.damage * 0.6)),
+                size: Math.max(12, Math.round(config.size * 0.7)),
+                speed: Math.round(config.speed * 1.15),
+                xpDrop: 1,
+                goldDrop: Math.max(1, Math.round(config.goldDrop * 0.5)),
+                splitsInto: 0, // 子体不再分裂
+            };
+            const at = new Vec3(
+                position.x + (Math.random() - 0.5) * 40,
+                position.y + (Math.random() - 0.5) * 40,
+                0,
+            );
+            this.spawnEnemy(child, undefined, at, true);
+        }
+    }
+
+    /** 世界坐标 → 生成器本地坐标（分裂子体出生位置换算用） */
+    private worldToSpawnerLocal(world: Vec3): Vec3 {
+        const parent = this.node.parent;
+        const ui = parent ? parent.getComponent(UITransform) : null;
+        if (ui) return ui.convertToNodeSpaceAR(world);
+        return world.clone();
     }
 
     /** 无 enemyPrefab 时的开发期兜底，保证生成场景可直接预览。 */

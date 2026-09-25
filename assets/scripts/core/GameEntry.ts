@@ -21,6 +21,8 @@ import { WenxinUI } from '../wenxin/WenxinUI';
 import { LevelUpUI } from '../progression/LevelUpUI';
 import { PickupSystem } from '../progression/PickupSystem';
 import { DebugPanel } from '../ui/DebugPanel';
+import { Banner } from '../ui/Banner';
+import { DashAbility } from '../player/DashAbility';
 
 const { ccclass } = _decorator;
 
@@ -142,6 +144,10 @@ export class GameEntry extends Component {
         this.ensureComponent(uiRoot, 'WenxinUI', WenxinUI);
         this.ensureComponent(uiRoot, 'LevelUpUI', LevelUpUI);
         this.ensureComponent(uiRoot, 'GameOverUI', GameOverUI);
+        // 事件短横幅（妖王来袭 / 灵脉现世 / 流派天赋 / 身法绝妙 / 问心功成）
+        this.ensureComponent(uiRoot, 'Banner', Banner);
+        // 御风步（唯一主动技能：右下角按钮 + 冲刺位移/无敌/击退）
+        this.ensureComponent(uiRoot, 'DashAbility', DashAbility);
         // 可玩状态调试面板（仅开发环境；GAME_CONFIG.debug.debugUi / DEBUG_UI 常量关闭）
         if (GAME_CONFIG.debug.debugUi) {
             this.ensureComponent(uiRoot, 'DebugPanel', DebugPanel);

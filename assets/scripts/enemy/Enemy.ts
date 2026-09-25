@@ -30,9 +30,19 @@ import { EnemyType, EnemyConfig } from './EnemyTypes';
 const { ccclass, property } = _decorator;
 
 /** 敌方弹幕参数（未配置 bulletPrefab 时由代码生成弹幕节点） */
-const BULLET_SPEED = 320;
-const BULLET_LIFETIME = 3;
+const BULLET_SPEED = 210;   // 缓慢弹丸：玩家有充足时间走位躲避
+const BULLET_LIFETIME = 4;
 const BULLET_RADIUS = 7;
+/** 弹幕轨迹点生成间隔（秒） */
+const BULLET_TRAIL_INTERVAL = 0.12;
+
+/** 冲锋妖兽状态机 */
+enum ChargeState {
+    CHASE = 0,      // 逼近玩家（等待冲锋冷却）
+    TELEGRAPH = 1,  // 红色预警线（0.7s，玩家据此走位）
+    CHARGING = 2,   // 高速直线冲锋
+    STUNNED = 3,    // 撞墙 / 未命中后眩晕（承受双倍伤害）
+}
 
 /**
  * Spawner 句柄（结构化类型，避免 Enemy ↔ Spawner 互相 import 造成循环依赖）。
@@ -40,6 +50,12 @@ const BULLET_RADIUS = 7;
  */
 export interface EnemySpawnerHandle {
     onEnemyRemoved(enemy: Enemy): void;
+    /** 地图半宽（冲锋妖兽撞墙判定用，与生成器边界一致） */
+    mapHalfWidth: number;
+    /** 地图半高 */
+    mapHalfHeight: number;
+    /** 分裂：在指定位置生成子体（分裂小妖死亡时由 Enemy.die 调用） */
+    spawnSplitChildren?(config: EnemyConfig, position: Vec3, count: number): void;
 }
 
 @ccclass('Enemy')
@@ -79,6 +95,24 @@ export class Enemy extends Component {
     private bulletLife: number[] = [];
     /** 每颗弹幕的伤害（与 bullets 平行，命中时结算） */
     private bulletDamages: number[] = [];
+    /** 每颗弹幕的轨迹计时（与 bullets 平行） */
+    private bulletTrailTimers: number[] = [];
+
+    // —— 冲锋妖兽状态 ——
+    private chargeState: ChargeState = ChargeState.CHASE;
+    /** 当前状态剩余时间（预警 / 眩晕） */
+    private chargeTimer: number = 0;
+    /** 距下次锁定玩家的时间 */
+    private chargeCooldown: number = 0;
+    /** 锁定的冲锋方向（预警时确定，之后不再转向 —— 这是"可躲避"的基础） */
+    private chargeDir: Vec3 = v3(1, 0, 0);
+    private chargeTraveled: number = 0;
+    /** 红色预警线节点（冲锋前 0.7s 显示） */
+    private chargeWarning: Node | null = null;
+    /** 眩晕剩余时间（>0 时承受双倍伤害） */
+    private stunTimer: number = 0;
+    /** 分裂子体标记（子体不再继续分裂） */
+    private isSplitChild: boolean = false;
 
     /** 已回收标记（防重复回收/重复回调） */
     private recycled: boolean = false;
@@ -112,17 +146,32 @@ export class Enemy extends Component {
      * @param spawner       生成器句柄（死亡/回收时回调计数）
      * @param timeMinutes   当前游戏分钟数，用于数值时间缩放
      * @param hpOverride    覆盖血量（仅 Boss 使用，由 Spawner 按玩家 DPS 估算）
+     * @param isSplitChild  是否为分裂子体（子体不再分裂）
      */
-    public init(config: EnemyConfig, spawner: EnemySpawnerHandle, timeMinutes: number, hpOverride?: number): void {
+    public init(
+        config: EnemyConfig,
+        spawner: EnemySpawnerHandle,
+        timeMinutes: number,
+        hpOverride?: number,
+        isSplitChild: boolean = false,
+    ): void {
         this.config = config;
         this.spawner = spawner;
         this.recycled = false;
+        this.isSplitChild = isSplitChild;
         this.isBoss = config.isBoss;
         this.bossPhaseTwo = false;
         this.knockbackVel.set(0, 0, 0);
         this.strafePhase = 0;
         this.shootTimer = 0;
         this.attackTimer = 0.4; // 接触后 0.4s 才首次造成伤害，给玩家反应时间
+        // 冲锋状态复位（首次冲锋略早于常规间隔，让玩家尽快看到"可反制的敌人"）
+        this.chargeState = ChargeState.CHASE;
+        this.chargeTimer = 0;
+        this.chargeCooldown = config.chargeSkill ? config.chargeSkill.interval * 0.6 : 0;
+        this.chargeTraveled = 0;
+        this.stunTimer = 0;
+        this.destroyChargeWarning();
         this.unscheduleAllCallbacks();
         this.clearBullets();
 
@@ -196,11 +245,186 @@ export class Enemy extends Component {
         if (GameManager.getInstance().state !== GameState.PLAYING) return; // 暂停时冻结全场
         if (!this.config || this.recycled || this.dying) return;
 
-        this.updateMove(dt);
+        // 冲锋妖兽走独立状态机（逼近 → 预警 → 冲锋 → 眩晕），其余走标准追击
+        if (this.config.chargeSkill && !this.isSplitChild) {
+            this.updateChargeBrain(dt);
+        } else {
+            this.updateMove(dt);
+        }
         this.updateMeleeAttack(dt);
         this.updateShoot(dt);
         this.updateBullets(dt);
         this.checkDespawn();
+    }
+
+    // ==================== 冲锋妖兽（有预警、可躲避、撞墙可反打） ====================
+
+    /**
+     * 冲锋状态机：
+     *   逼近（每 7 秒）→ 锁定玩家当前位置 → 红色预警线 0.7s → 高速直线冲锋
+     *   → 撞墙或未命中则眩晕 1s（承受双倍伤害），命中玩家则直接进入下一轮冷却。
+     * 方向在预警时锁定、冲锋中不再转向 —— 玩家横向移动或御风步即可躲开。
+     */
+    private updateChargeBrain(dt: number): void {
+        const skill = this.config!.chargeSkill;
+        if (!skill) {
+            this.updateMove(dt);
+            return;
+        }
+
+        // 眩晕：不移动、不预警，且承受双倍伤害（见 takeDamage）
+        if (this.stunTimer > 0) {
+            this.stunTimer -= dt;
+            this.updateChargeWarning(-1);
+            if (this.stunTimer <= 0) {
+                this.chargeState = ChargeState.CHASE;
+                this.redraw(); // 移除眩晕环
+            }
+            return;
+        }
+
+        switch (this.chargeState) {
+            case ChargeState.CHASE: {
+                this.updateMove(dt);
+                this.chargeCooldown -= dt;
+                if (this.chargeCooldown > 0) break;
+                if (!this.findTarget()) break;
+                const dx = this.target!.worldPosition.x - this.node.worldPosition.x;
+                const dy = this.target!.worldPosition.y - this.node.worldPosition.y;
+                const distSq = dx * dx + dy * dy;
+                if (distSq > 720 * 720 || distSq < 1) break; // 太远不冲锋
+                // 锁定玩家当前位置（冲锋方向不再追踪，玩家因此可以躲）
+                this.chargeDir = v3(dx, dy, 0).normalize();
+                this.chargeTimer = skill.telegraph;
+                this.chargeState = ChargeState.TELEGRAPH;
+                break;
+            }
+
+            case ChargeState.TELEGRAPH: {
+                this.chargeTimer -= dt;
+                const progress = 1 - Math.max(0, this.chargeTimer / skill.telegraph);
+                this.updateChargeWarning(progress); // 预警线随进度长满
+                if (this.chargeTimer <= 0) {
+                    this.chargeState = ChargeState.CHARGING;
+                    this.chargeTraveled = 0;
+                    this.attackTimer = 0; // 冲锋接触立即结算伤害
+                    this.updateChargeWarning(-1);
+                }
+                break;
+            }
+
+            case ChargeState.CHARGING: {
+                const step = skill.speed * dt;
+                const pos = this.node.position;
+                const halfW = this.spawner ? this.spawner.mapHalfWidth : 950;
+                const halfH = this.spawner ? this.spawner.mapHalfHeight : 950;
+                let nx = pos.x + this.chargeDir.x * step;
+                let ny = pos.y + this.chargeDir.y * step;
+                let hitWall = false;
+                // 撞墙判定：地图边界（被钳制即视为撞墙）
+                if (nx < -halfW || nx > halfW) {
+                    nx = Math.min(Math.max(nx, -halfW), halfW);
+                    hitWall = true;
+                }
+                if (ny < -halfH || ny > halfH) {
+                    ny = Math.min(Math.max(ny, -halfH), halfH);
+                    hitWall = true;
+                }
+                this.node.setPosition(nx, ny, pos.z);
+                this.chargeTraveled += step;
+
+                if (this.isTouchingPlayer()) {
+                    // 命中玩家：冲锋成功，直接进入下一轮冷却（不眩晕）
+                    this.chargeState = ChargeState.CHASE;
+                    this.chargeCooldown = skill.interval;
+                } else if (hitWall || this.chargeTraveled >= skill.maxDistance) {
+                    // 撞墙 / 冲空：眩晕，期间承受双倍伤害 —— 玩家的反击窗口
+                    this.enterStun(skill.stun);
+                }
+                break;
+            }
+
+            case ChargeState.STUNNED:
+                break;
+        }
+    }
+
+    /** 进入眩晕（撞墙/未命中）：停止移动，期间承受双倍伤害 */
+    private enterStun(seconds: number): void {
+        const skill = this.config?.chargeSkill;
+        this.chargeState = ChargeState.STUNNED;
+        this.stunTimer = Math.max(0.1, seconds);
+        this.chargeCooldown = skill ? skill.interval : 0;
+        this.updateChargeWarning(-1);
+        this.redraw(); // 眩晕环视觉
+    }
+
+    /** 是否与玩家接触（冲锋命中判定；与接触攻击同一套距离口径） */
+    private isTouchingPlayer(): boolean {
+        if (!this.target || !this.target.isValid) return false;
+        const reach = this.getRadius() + GAME_CONFIG.player.hitRadius;
+        return Vec3.squaredDistance(this.node.worldPosition, this.target.worldPosition) <= reach * reach;
+    }
+
+    /** 更新红色冲锋预警线（progress < 0 表示隐藏） */
+    private updateChargeWarning(progress: number): void {
+        const skill = this.config?.chargeSkill;
+        const parent = this.node.parent;
+        if (!skill || !parent) return;
+
+        if (progress < 0) {
+            if (this.chargeWarning && this.chargeWarning.isValid) this.chargeWarning.active = false;
+            return;
+        }
+
+        if (!this.chargeWarning || !this.chargeWarning.isValid) {
+            const n = new Node('ChargeWarning');
+            n.setParent(parent);
+            n.addComponent(UITransform).setContentSize(skill.maxDistance, skill.warningWidth);
+            n.addComponent(Graphics);
+            this.chargeWarning = n;
+        }
+        const g = this.chargeWarning.getComponent(Graphics);
+        if (!g) return;
+        const len = skill.maxDistance;
+        const w = skill.warningWidth;
+        g.clear();
+        // 底面警示带
+        g.fillColor = new Color(255, 60, 60, 55);
+        g.rect(0, -w / 2, len, w);
+        g.fill();
+        // 进度填充（0 → 长满 = 即将冲锋）
+        g.fillColor = new Color(255, 60, 60, 135);
+        g.rect(0, -w / 2, len * Math.max(0, Math.min(1, progress)), w);
+        g.fill();
+        // 描边
+        g.lineWidth = 3;
+        g.strokeColor = new Color(255, 96, 96, 220);
+        g.rect(0, -w / 2, len, w);
+        g.stroke();
+
+        this.chargeWarning.setPosition(this.node.position.x, this.node.position.y, 0);
+        this.chargeWarning.angle = (Math.atan2(this.chargeDir.y, this.chargeDir.x) * 180) / Math.PI;
+        this.chargeWarning.active = true;
+    }
+
+    /** 销毁预警线节点（回收/复位时调用） */
+    private destroyChargeWarning(): void {
+        if (this.chargeWarning && this.chargeWarning.isValid) {
+            this.chargeWarning.destroy();
+        }
+        this.chargeWarning = null;
+    }
+
+    /** 施加击退（御风步穿过敌人时调用）；dir 会被归一化 */
+    public applyKnockback(dir: Vec3, strength: number = 1): void {
+        if (this.recycled || this.dying) return;
+        const d = dir.clone();
+        d.z = 0;
+        if (d.lengthSqr() < 0.0001) return;
+        d.normalize();
+        const force = 300 * strength * (1 - this.knockResistance);
+        this.knockbackVel.set(d.x * force, d.y * force, 0);
     }
 
     // ==================== 接触攻击 ====================
@@ -331,13 +555,18 @@ export class Enemy extends Component {
         this.bulletVels.push(v3(Math.cos(angle), Math.sin(angle), 0).multiplyScalar(BULLET_SPEED));
         this.bulletLife.push(BULLET_LIFETIME);
         this.bulletDamages.push(this.damage);
+        this.bulletTrailTimers.push(0);
     }
 
-    /** 程序化弹幕（紫色灵光弹）：无美术资源时的占位视觉 */
+    /** 程序化弹幕（紫色灵光弹）：带地面阴影，便于判断落点与轨迹 */
     private createProceduralBullet(): Node {
         const bullet = new Node('EnemyBullet');
-        bullet.addComponent(UITransform).setContentSize(BULLET_RADIUS * 3, BULLET_RADIUS * 3);
+        bullet.addComponent(UITransform).setContentSize(BULLET_RADIUS * 4, BULLET_RADIUS * 4);
         const g = bullet.addComponent(Graphics);
+        // 地面阴影（偏移下方，暗示高度与落点）
+        g.fillColor = new Color(30, 10, 60, 90);
+        g.ellipse(0, -BULLET_RADIUS - 4, BULLET_RADIUS * 1.3, BULLET_RADIUS * 0.55);
+        g.fill();
         // 外圈柔光
         g.fillColor = new Color(186, 120, 255, 70);
         g.circle(0, 0, BULLET_RADIUS + 4);
@@ -354,7 +583,27 @@ export class Enemy extends Component {
         return bullet;
     }
 
-    /** 驱动弹幕移动、命中玩家判定与生命周期 */
+    /** 生成一个轨迹残影（0.35s 淡出），让弹幕"有明显轨迹" */
+    private spawnBulletTrail(parent: Node, pos: Vec3): void {
+        const dot = new Node('BulletTrail');
+        parent.addChild(dot);
+        dot.setWorldPosition(pos);
+        dot.addComponent(UITransform).setContentSize(BULLET_RADIUS * 2, BULLET_RADIUS * 2);
+        const g = dot.addComponent(Graphics);
+        g.fillColor = new Color(198, 138, 255, 150);
+        g.circle(0, 0, BULLET_RADIUS * 0.7);
+        g.fill();
+        const op = dot.addComponent(UIOpacity);
+        op.opacity = 170;
+        tween(op)
+            .to(0.35, { opacity: 0 })
+            .call(() => {
+                if (dot.isValid) dot.destroy();
+            })
+            .start();
+    }
+
+    /** 驱动弹幕移动、轨迹、命中玩家判定与生命周期 */
     private updateBullets(dt: number): void {
         const target = this.target && this.target.isValid ? this.target : null;
         const hitRadius = BULLET_RADIUS + GAME_CONFIG.player.hitRadius;
@@ -369,6 +618,13 @@ export class Enemy extends Component {
                 continue;
             }
             b.setPosition(b.position.x + v.x * dt, b.position.y + v.y * dt, 0);
+
+            // 轨迹残影（低频生成，控制节点数量）
+            this.bulletTrailTimers[i] -= dt;
+            if (this.bulletTrailTimers[i] <= 0 && b.parent) {
+                this.bulletTrailTimers[i] = BULLET_TRAIL_INTERVAL;
+                this.spawnBulletTrail(b.parent, b.worldPosition.clone());
+            }
 
             // 命中玩家：距离判定 + 广播 ENEMY_ATTACK（不依赖 2D 物理）
             if (target && Vec3.squaredDistance(b.worldPosition, target.worldPosition) <= hitRadius * hitRadius) {
@@ -388,6 +644,7 @@ export class Enemy extends Component {
         this.bulletVels.splice(i, 1);
         this.bulletLife.splice(i, 1);
         this.bulletDamages.splice(i, 1);
+        this.bulletTrailTimers.splice(i, 1);
     }
 
     private clearBullets(): void {
@@ -396,6 +653,7 @@ export class Enemy extends Component {
         this.bulletVels.length = 0;
         this.bulletLife.length = 0;
         this.bulletDamages.length = 0;
+        this.bulletTrailTimers.length = 0;
     }
 
     // ==================== 受击 ====================
@@ -404,10 +662,14 @@ export class Enemy extends Component {
      * 受到伤害（武器系统调用）。
      * @param amount   伤害数值
      * @param knockDir 击退方向（单位向量），不传则无击退
+     * @returns 实际结算的伤害（0 = 被忽略，如已死亡）；眩晕中的冲锋妖兽承受双倍伤害
      */
-    public takeDamage(amount: number, knockDir?: Vec3): void {
-        if (this.recycled || this.dying || !this.config) return;
-        this.hp -= amount;
+    public takeDamage(amount: number, knockDir?: Vec3): number {
+        if (this.recycled || this.dying || !this.config) return 0;
+        // 眩晕（撞墙/冲锋未命中）期间承受双倍伤害：这是玩家"反打"的收益
+        const multiplier = this.stunTimer > 0 ? 2 : 1;
+        const applied = Math.max(1, Math.round(amount * multiplier));
+        this.hp -= applied;
         this.flashHit(); // 受击闪白（Graphics 重绘）
         this.redraw();   // 同步刷新头顶血条
 
@@ -425,6 +687,7 @@ export class Enemy extends Component {
             this.moveSpeed *= 1.3;
             EventBus.emit(GameEvent.BOSS_PHASE_TWO, { node: this.node });
         }
+        return applied;
     }
 
     /** 受击闪白（0.08s 后恢复基础色；Graphics 与 Sprite 双路径） */
@@ -465,6 +728,15 @@ export class Enemy extends Component {
         }
         if (!this.flashWhite) this.drawEyes(graphics, r);
         this.drawHealthBar(graphics);
+        if (this.stunTimer > 0) this.drawStunRing(graphics, r);
+    }
+
+    /** 眩晕标识（头顶黄色星环）：提示"现在是反击窗口，承伤翻倍" */
+    private drawStunRing(g: Graphics, r: number): void {
+        g.lineWidth = 3;
+        g.strokeColor = new Color(255, 216, 90, 235);
+        g.circle(0, r + 22, Math.max(5, r * 0.28));
+        g.stroke();
     }
 
     /** 普通怪：红色菱形 */
@@ -562,6 +834,11 @@ export class Enemy extends Component {
             xp: cfg.xpDrop,
             gold: cfg.goldDrop,
         });
+        // 分裂小妖：死亡后分裂为子体（子体不再分裂）—— 高收益但包围圈会扩大
+        if (cfg.splitsInto && cfg.splitsInto > 0 && !this.isSplitChild && this.spawner?.spawnSplitChildren) {
+            this.spawner.spawnSplitChildren(cfg, pos, cfg.splitsInto);
+        }
+        this.updateChargeWarning(-1);
         this.playDeathAnimation();
     }
 
@@ -605,6 +882,7 @@ export class Enemy extends Component {
     public recycle(): void {
         if (this.recycled) return;
         this.recycled = true;
+        this.destroyChargeWarning(); // 预警线是独立节点，必须一并清理
         this.clearBullets();
         this.target = null;
         // 注销战斗系统注册表
@@ -626,6 +904,7 @@ export class Enemy extends Component {
         // 注销战斗系统注册表（节点被直接销毁时兜底）
         const idx = Enemy.alive.indexOf(this);
         if (idx >= 0) Enemy.alive.splice(idx, 1);
+        this.destroyChargeWarning();
         this.clearBullets();
     }
 }

@@ -18,7 +18,7 @@
 //     通过 GOLD_PICKED 事件刷新
 // ============================================================
 
-import { _decorator, Component, Node, Label, Graphics, UITransform, Color, Vec3, view, Button, tween, Tween } from 'cc';
+import { _decorator, Component, Node, Label, Graphics, UITransform, Color, Vec3, view, Button, tween, Tween, EventTouch } from 'cc';
 import { find } from 'cc';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
@@ -489,6 +489,9 @@ export class HUD extends Component {
         pauseBtn.name = 'PauseButton';
         pauseBtn.setPosition(W / 2 - 100, H / 2 - 60, 0);
         this.pauseBtnLabel = pauseBtn.getComponentInChildren(Label);
+        // 阻止冒泡：否则点按钮会被 Canvas 上的拖拽移动监听同时吃掉（玩家会平白走一段）
+        pauseBtn.on(Node.EventType.TOUCH_START, (e: EventTouch) => { e.propagationStopped = true; });
+        pauseBtn.on(Node.EventType.TOUCH_END, (e: EventTouch) => { e.propagationStopped = true; });
 
         // ── 左上角：武器图标（最多 6 个，中文单字 + Lv.N） ──
         const WEAPON_ICON_Y = H / 2 - 126;

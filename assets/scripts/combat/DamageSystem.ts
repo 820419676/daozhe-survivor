@@ -111,14 +111,16 @@ export class DamageSystem {
             }
         }
 
-        // 扣血 + 受击闪白 + 击退 + （死亡时掉落/回收），由 Enemy 内部处理
-        enemy.takeDamage(amount, knockDir);
+        // 扣血 + 受击闪白 + 击退 + （死亡时掉落/回收），由 Enemy 内部处理。
+        // Enemy.takeDamage 返回实际结算值（含"眩晕中双倍伤害"等修正）
+        const applied = enemy.takeDamage(amount, knockDir);
+        if (applied <= 0) return; // 目标已死/已回收：不产生飘字
 
         // 广播伤害事件（位置取世界坐标副本；负载形状与 ui/DamageNumber 对齐）
         const pos = enemy.node.worldPosition;
         EventBus.getInstance().emit(GameEvent.COMBAT_DAMAGE, {
             target: enemy.getType() ?? 'unknown',
-            damage: amount,
+            damage: applied,
             isCrit: isCrit,
             position: { x: pos.x, y: pos.y },
         });

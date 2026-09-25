@@ -82,7 +82,12 @@ export class PlayerController extends Component {
     private static pickups: Node[] = [];
 
     private data: PlayerData = new PlayerData();
-    private isInvincible: boolean = false;
+    /** 受击无敌帧剩余时间（秒）；与御风步冲刺无敌相互独立、可叠加 */
+    private invincibleTimer: number = 0;
+    /** 御风步冲刺无敌（DashAbility 开关） */
+    private dashInvincible: boolean = false;
+    /** 冲刺中：暂停拖拽移动（DashAbility 开关，避免与冲刺位移互相拉扯） */
+    private dashing: boolean = false;
     private isDead: boolean = false;
 
     /** 经验系统（应用问心修为回馈倍率×贪婪，统一升级判定） */
@@ -158,9 +163,42 @@ export class PlayerController extends Component {
 
     update(dt: number): void {
         if (GameManager.getInstance().state !== GameState.PLAYING || this.isDead) return;
+        if (this.invincibleTimer > 0) this.invincibleTimer -= dt;
         this.handleMovement(dt);
         this.magnetPickup(dt);
         this.updateRegen(dt);
+    }
+
+    // ==================== 无敌 / 御风步接口 ====================
+
+    /** 是否处于无敌（受击无敌帧 或 御风步冲刺中） */
+    public isInvincible(): boolean {
+        return this.invincibleTimer > 0 || this.dashInvincible;
+    }
+
+    /** 御风步：冲刺期间无敌 */
+    public setDashInvincible(on: boolean): void {
+        this.dashInvincible = on;
+    }
+
+    /** 御风步：冲刺期间暂停拖拽移动（并清掉触摸目标，避免冲刺结束立刻被旧目标拉走） */
+    public setDashing(on: boolean): void {
+        this.dashing = on;
+        if (on) this.touchPos = null;
+    }
+
+    public isDashing(): boolean {
+        return this.dashing;
+    }
+
+    /** 当前朝向（御风步据此决定冲刺方向） */
+    public getFacing(): Vec3 {
+        return this.facing.clone();
+    }
+
+    /** 直接位移玩家到指定坐标（御风步用；自动做地图边界钳制） */
+    public moveTo(x: number, y: number): void {
+        this.clampToMap(x, y, this.node.position.z);
     }
 
     onDestroy(): void {
@@ -213,6 +251,7 @@ export class PlayerController extends Component {
     }
 
     private handleMovement(dt: number): void {
+        if (this.dashing) return; // 冲刺位移由 DashAbility 接管
         if (!this.touchPos) return;
         const pos = this.node.position;
         const dx = this.touchPos.x - pos.x;
@@ -376,13 +415,9 @@ export class PlayerController extends Component {
      * 判定在 Enemy 侧做距离检测，不依赖 2D 物理系统的碰撞回调。
      */
     public takeDamage(amount: number): void {
-        if (this.isInvincible || this.isDead || amount <= 0) return;
+        if (this.isInvincible() || this.isDead || amount <= 0) return;
         this.data.hp -= amount;
-        this.isInvincible = true;
-        this.scheduleOnce(
-            () => (this.isInvincible = false),
-            GAME_CONFIG.player.invincibleFrames,
-        ); // 无敌帧（数值收敛在 GameConfig）
+        this.invincibleTimer = GAME_CONFIG.player.invincibleFrames; // 无敌帧（数值收敛在 GameConfig）
         this.flashHit();
         this.refreshHpBar();
         EventBus.emit(GameEvent.PLAYER_DAMAGED, { hp: this.data.hp, maxHp: this.data.maxHp, amount });

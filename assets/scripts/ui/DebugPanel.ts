@@ -19,6 +19,8 @@ import { GameManager, GameState } from '../core/GameManager';
 import { PlayerRegistry } from '../core/PlayerRegistry';
 import { PlayerData } from '../player/PlayerData';
 import { Enemy } from '../enemy/Enemy';
+import { EnemyType } from '../enemy/EnemyTypes';
+import { DashAbility } from '../player/DashAbility';
 import { WEAPON_CONFIGS, WeaponType } from '../combat/WeaponData';
 import { hexColor, makeLabel, makePanel } from '../core/UIUtils';
 import { PASSIVE_CONFIGS } from '../combat/PassiveData';
@@ -29,10 +31,12 @@ const { ccclass } = _decorator;
 const REFRESH_INTERVAL = 0.2;
 /** 武器行数上限（与武器槽位一致） */
 const MAX_WEAPON_ROWS = 6;
-/** 面板尺寸与行距 */
+/** 面板尺寸与行距（底部需给右下角御风步按钮让位，故整体上移） */
 const PANEL_W = 408;
-const PANEL_H = 248;
+const PANEL_H = 255;
 const LINE_GAP = 17;
+/** 面板底边距屏幕底部的距离（= 御风按钮高度 + 间隙） */
+const BOTTOM_OFFSET = 96;
 
 /** 武器类型中文名（排查"哪个技能没效果"时快速定位释放形态） */
 const WEAPON_TYPE_NAMES: Record<number, string> = {
@@ -65,6 +69,8 @@ export class DebugPanel extends Component {
     private passiveLabel: Label | null = null;
     private statsLabel: Label | null = null;
     private hpLabel: Label | null = null;
+    /** 系统状态行：御风步冷却 / 在场精英数 / 灵脉状态 */
+    private statusLabel: Label | null = null;
     private stateLabel: Label | null = null;
 
     private kills: number = 0;
@@ -167,16 +173,38 @@ export class DebugPanel extends Component {
                 ? `HP ${Math.ceil(pd.hp)}/${pd.maxHp}  受伤${this.damageTaken}  暴击${Math.round(pd.critChance * 100)}%  磁吸${Math.round(pd.pickupRange)}  道心${Math.round(pd.bravery)}`
                 : 'HP —';
         }
+        if (this.statusLabel) {
+            const dash = DashAbility.getInstance();
+            const dashText = dash
+                ? (dash.isDashing() ? '冲刺中' : dash.getCooldownRemaining() > 0 ? `${dash.getCooldownRemaining().toFixed(1)}s` : 'READY')
+                : '—';
+            let eliteCount = 0;
+            for (const e of Enemy.alive) {
+                if (e.node.isValid && e.getType() === EnemyType.ELITE) eliteCount++;
+            }
+            this.statusLabel.string = `Dash ${dashText}   Elite ${eliteCount}   Lingmai ${this.lingmaiText()}`;
+        }
         if (this.stateLabel) {
             this.stateLabel.string = `State: ${gm ? GameState[gm.state] : '?'}  ${gm ? formatMMSS(gm.elapsedTime) : '00:00'}`;
         }
+    }
+
+    /** 灵脉状态文案（灵脉系统在阶段 2 接入，接入前显示 —） */
+    private lingmaiText(): string {
+        const sys = (globalThis as Record<string, unknown>)['__lingmaiStatus'];
+        return typeof sys === 'string' && sys.length > 0 ? sys : '—';
     }
 
     private buildUI(): void {
         const size = view.getVisibleSize();
         const panel = makePanel(this.node, PANEL_W, PANEL_H, hexColor('#0A0E14', 205), 10);
         panel.name = 'DebugRoot';
-        panel.setPosition(size.width / 2 - PANEL_W / 2 - 14, -size.height / 2 + PANEL_H / 2 + 14, 0);
+        // 右下角，但整体上移给御风步按钮让位
+        panel.setPosition(
+            size.width / 2 - PANEL_W / 2 - 14,
+            -size.height / 2 + BOTTOM_OFFSET + PANEL_H / 2,
+            0,
+        );
 
         const title = makeLabel(panel, 'DEBUG', 13, '#7DD3FC', PANEL_W - 20, 18);
         title.node.setPosition(0, PANEL_H / 2 - 15, 0);
@@ -192,6 +220,7 @@ export class DebugPanel extends Component {
         this.passiveLabel = this.addLine(panel, '', y, '#B9A6FF'); y -= LINE_GAP;
         this.statsLabel = this.addLine(panel, '', y, '#9BD7A0'); y -= LINE_GAP;
         this.hpLabel = this.addLine(panel, '', y, '#C8D6E0'); y -= LINE_GAP;
+        this.statusLabel = this.addLine(panel, '', y, '#F0ABFC'); y -= LINE_GAP;
         this.stateLabel = this.addLine(panel, '', y, '#7DD3FC');
 
         this.refresh();
