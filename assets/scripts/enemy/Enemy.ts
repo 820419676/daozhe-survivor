@@ -25,6 +25,7 @@ import { GameManager, GameState } from '../core/GameManager';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
 import { GAME_CONFIG } from '../core/GameConfig';
+import { DamageNumber } from '../ui/DamageNumber';
 import { EnemyType, EnemyConfig } from './EnemyTypes';
 
 const { ccclass, property } = _decorator;
@@ -114,6 +115,14 @@ export class Enemy extends Component {
     /** 分裂子体标记（子体不再继续分裂） */
     private isSplitChild: boolean = false;
 
+    // —— 精英火圈技能 ——
+    /** 火圈冷却计时 */
+    private novaTimer: number = 0;
+    /** 火圈预警剩余时间（>0 表示正在预警，期间停止移动） */
+    private novaTelegraph: number = 0;
+    /** 火圈预警圈节点 */
+    private novaWarnNode: Node | null = null;
+
     /** 已回收标记（防重复回收/重复回调） */
     private recycled: boolean = false;
     /** 死亡演出中（缩小+淡出，期间冻结 AI 与碰撞） */
@@ -171,7 +180,10 @@ export class Enemy extends Component {
         this.chargeCooldown = config.chargeSkill ? config.chargeSkill.interval * 0.6 : 0;
         this.chargeTraveled = 0;
         this.stunTimer = 0;
+        this.novaTimer = config.novaSkill ? config.novaSkill.interval * 0.5 : 0;
+        this.novaTelegraph = 0;
         this.destroyChargeWarning();
+        this.clearNovaWarning();
         this.unscheduleAllCallbacks();
         this.clearBullets();
 
@@ -245,16 +257,100 @@ export class Enemy extends Component {
         if (GameManager.getInstance().state !== GameState.PLAYING) return; // 暂停时冻结全场
         if (!this.config || this.recycled || this.dying) return;
 
-        // 冲锋妖兽走独立状态机（逼近 → 预警 → 冲锋 → 眩晕），其余走标准追击
-        if (this.config.chargeSkill && !this.isSplitChild) {
+        // 精英火圈预警期间停止移动 —— 这段时间正是玩家走出圈子的窗口
+        if (this.novaTelegraph > 0) {
+            const nova = this.config.novaSkill!;
+            this.novaTelegraph -= dt;
+            this.updateNovaWarning(1 - Math.max(0, this.novaTelegraph) / nova.telegraph);
+            if (this.novaTelegraph <= 0) this.explodeNova();
+        } else if (this.config.chargeSkill && !this.isSplitChild) {
+            // 冲锋妖兽走独立状态机（逼近 → 预警 → 冲锋 → 眩晕），其余走标准追击
             this.updateChargeBrain(dt);
         } else {
             this.updateMove(dt);
         }
+        this.updateNovaCooldown(dt);
         this.updateMeleeAttack(dt);
         this.updateShoot(dt);
         this.updateBullets(dt);
         this.checkDespawn();
+    }
+
+    // ==================== 精英火圈（有预警、可走位躲避） ====================
+
+    /** 火圈冷却：玩家在射程内才起手，避免对着空气放技能 */
+    private updateNovaCooldown(dt: number): void {
+        const nova = this.config?.novaSkill;
+        if (!nova || this.novaTelegraph > 0) return;
+        this.novaTimer -= dt;
+        if (this.novaTimer > 0) return;
+        if (!this.findTarget()) return;
+        const dist = Vec3.distance(this.node.worldPosition, this.target!.worldPosition);
+        if (dist > nova.radius + 160) return;
+        this.novaTimer = nova.interval;
+        this.novaTelegraph = nova.telegraph;
+    }
+
+    /** 火圈爆发：圈内玩家受伤（预警 0.9s 足够走出 210px 半径） */
+    private explodeNova(): void {
+        const nova = this.config?.novaSkill;
+        this.novaTelegraph = 0;
+        this.clearNovaWarning();
+        if (!nova || !this.findTarget()) return;
+
+        const dist = Vec3.distance(this.node.worldPosition, this.target!.worldPosition);
+        if (dist <= nova.radius + GAME_CONFIG.player.hitRadius) {
+            EventBus.emit(GameEvent.ENEMY_ATTACK, {
+                damage: Math.round(this.damage * nova.damageMultiplier),
+                kind: 'nova',
+            });
+        }
+        // 爆发视觉：白色扩散圆环（复用击杀圆环）
+        DamageNumber.ring(this.node.worldPosition.clone());
+    }
+
+    /** 火圈预警圈：危险区填充 + 从外圈收缩的黄色倒计时环 */
+    private updateNovaWarning(progress: number): void {
+        const nova = this.config?.novaSkill;
+        const parent = this.node.parent;
+        if (!nova || !parent) return;
+
+        if (!this.novaWarnNode || !this.novaWarnNode.isValid) {
+            const n = new Node('NovaWarning');
+            n.setParent(parent);
+            n.addComponent(UITransform).setContentSize(nova.radius * 2, nova.radius * 2);
+            n.addComponent(Graphics);
+            this.novaWarnNode = n;
+        }
+        const g = this.novaWarnNode.getComponent(Graphics);
+        if (!g) return;
+        const r = nova.radius;
+        const p = Math.max(0, Math.min(1, progress));
+
+        g.clear();
+        // 危险区填充（随预警进度加深）
+        g.fillColor = new Color(255, 70, 40, Math.round(35 + 95 * p));
+        g.circle(0, 0, r);
+        g.fill();
+        // 范围外圈
+        g.lineWidth = 4;
+        g.strokeColor = new Color(255, 90, 60, 225);
+        g.circle(0, 0, r);
+        g.stroke();
+        // 收缩倒计时环
+        g.lineWidth = 5;
+        g.strokeColor = new Color(255, 230, 120, 240);
+        g.circle(0, 0, r * (1 - p) + 12);
+        g.stroke();
+
+        this.novaWarnNode.setPosition(this.node.position.x, this.node.position.y, 0);
+        this.novaWarnNode.active = true;
+    }
+
+    /** 销毁火圈预警节点 */
+    private clearNovaWarning(): void {
+        if (this.novaWarnNode && this.novaWarnNode.isValid) this.novaWarnNode.destroy();
+        this.novaWarnNode = null;
     }
 
     // ==================== 冲锋妖兽（有预警、可躲避、撞墙可反打） ====================
@@ -414,17 +510,6 @@ export class Enemy extends Component {
             this.chargeWarning.destroy();
         }
         this.chargeWarning = null;
-    }
-
-    /** 施加击退（御风步穿过敌人时调用）；dir 会被归一化 */
-    public applyKnockback(dir: Vec3, strength: number = 1): void {
-        if (this.recycled || this.dying) return;
-        const d = dir.clone();
-        d.z = 0;
-        if (d.lengthSqr() < 0.0001) return;
-        d.normalize();
-        const force = 300 * strength * (1 - this.knockResistance);
-        this.knockbackVel.set(d.x * force, d.y * force, 0);
     }
 
     // ==================== 接触攻击 ====================
@@ -883,6 +968,7 @@ export class Enemy extends Component {
         if (this.recycled) return;
         this.recycled = true;
         this.destroyChargeWarning(); // 预警线是独立节点，必须一并清理
+        this.clearNovaWarning();
         this.clearBullets();
         this.target = null;
         // 注销战斗系统注册表
@@ -905,6 +991,7 @@ export class Enemy extends Component {
         const idx = Enemy.alive.indexOf(this);
         if (idx >= 0) Enemy.alive.splice(idx, 1);
         this.destroyChargeWarning();
+        this.clearNovaWarning();
         this.clearBullets();
     }
 }

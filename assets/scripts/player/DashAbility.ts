@@ -24,6 +24,7 @@ import { GAME_CONFIG } from '../core/GameConfig';
 import { GameManager, GameState } from '../core/GameManager';
 import { PlayerController } from '../player/PlayerController';
 import { Enemy } from '../enemy/Enemy';
+import { DamageSystem } from '../combat/DamageSystem';
 import { hexColor } from '../core/UIUtils';
 import { Banner } from '../ui/Banner';
 
@@ -52,6 +53,8 @@ export class DashAbility extends Component {
     /** 本次冲刺已穿过的敌人（去重统计） */
     private hitEnemies: Set<Enemy> = new Set();
     private passedCount: number = 0;
+    /** 下一次冲刺伤害翻倍（灵脉奖励"御风步·刷新"赋予） */
+    private doubleDamageNextDash: boolean = false;
 
     // —— UI ——
     private btnNode: Node | null = null;
@@ -79,6 +82,18 @@ export class DashAbility extends Component {
     /** 是否正在冲刺 */
     public isDashing(): boolean {
         return this.dashTimer > 0;
+    }
+
+    /** 灵脉奖励：立刻刷新冷却 */
+    public refreshNow(): void {
+        this.cooldown = 0;
+        this.playReadyFlash();
+        EventBus.emit(GameEvent.DASH_READY);
+    }
+
+    /** 灵脉奖励：下一次冲刺伤害翻倍（冲刺结束时消耗） */
+    public grantDoubleDamageNextDash(): void {
+        this.doubleDamageNextDash = true;
     }
 
     // ==================== 帧更新 ====================
@@ -141,18 +156,24 @@ export class DashAbility extends Component {
         const pos = player.node.position;
         player.moveTo(pos.x + this.dashDir.x * step, pos.y + this.dashDir.y * step);
 
-        this.knockbackNearby();
+        this.hitNearby();
 
         this.dashTimer -= dt;
         if (this.dashTimer <= 0) this.endDash(true);
     }
 
-    /** 冲刺路径上的敌人：轻微击退 + 统计穿过数量 */
-    private knockbackNearby(): void {
+    /**
+     * 冲刺路径上的敌人：造成冲刺伤害（结算走 DamageSystem，伤害数字/暴击/击退一并生效）
+     * + 统计穿过数量。伤害基础值 20，"下一次冲刺伤害翻倍"期间 ×2。
+     */
+    private hitNearby(): void {
         const player = this.resolvePlayer();
         if (!player) return;
-        const r = GAME_CONFIG.dash.hitRadius;
+        const dash = GAME_CONFIG.dash;
+        const r = dash.hitRadius;
         const myPos = player.node.worldPosition;
+        const damage = dash.damage * (this.doubleDamageNextDash ? 2 : 1);
+
         for (const e of Enemy.alive) {
             if (this.hitEnemies.has(e)) continue;
             if (!e.node.isValid || !e.node.activeInHierarchy) continue;
@@ -160,7 +181,12 @@ export class DashAbility extends Component {
             if (d.lengthSqr() > r * r) continue;
             this.hitEnemies.add(e);
             this.passedCount++;
-            e.applyKnockback(d, GAME_CONFIG.dash.knockback);
+
+            // 方向 × 击退系数（DamageSystem 按该向量的长度施加击退力度）
+            const knock = d.clone();
+            const len = Math.max(0.001, knock.length());
+            knock.multiplyScalar(dash.knockback / len);
+            DamageSystem.applyDamage(e, damage, false, knock);
         }
     }
 
@@ -178,6 +204,7 @@ export class DashAbility extends Component {
             if (this.passedCount >= GAME_CONFIG.dash.perfectCount) {
                 Banner.show('身法绝妙', '#5EEAD4', 1.2);
             }
+            this.doubleDamageNextDash = false; // 翻倍效果只作用于这一次冲刺
         }
     }
 

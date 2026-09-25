@@ -32,6 +32,18 @@ export enum EnemyType {
     BOSS = 'boss',
 }
 
+/** 火圈技能参数（精英妖王专属：先画预警圈，再范围爆发 —— 玩家走出圈子即可躲开） */
+export interface NovaSkillConfig {
+    /** 冷却（秒） */
+    interval: number;
+    /** 预警时长（秒） */
+    telegraph: number;
+    /** 爆发半径（px） */
+    radius: number;
+    /** 伤害倍率（相对精英接触伤害） */
+    damageMultiplier: number;
+}
+
 /** 冲锋技能参数（冲锋妖兽专属；让玩家必须观察与走位） */
 export interface ChargeSkillConfig {
     /** 冷却（秒）：每该时间锁定一次玩家当前位置 */
@@ -78,6 +90,8 @@ export interface EnemyConfig {
     splitsInto?: number;
     /** 冲锋技能参数（冲锋妖兽专属；省略 = 无冲锋技能） */
     chargeSkill?: ChargeSkillConfig;
+    /** 火圈技能参数（精英妖王专属；省略 = 无火圈技能） */
+    novaSkill?: NovaSkillConfig;
     /** 是否 Boss */
     isBoss: boolean;
     /** 宝箱掉落率（0~1；普通 0.5%，精英/Boss 100%） */
@@ -187,6 +201,13 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
         canShoot: false, // 技能系统后续接入：冲锋 / 放射弹 / 召唤杂鱼
         shootInterval: 0,
         attackInterval: 1.2,
+        // 精英妖王招牌技能：火圈爆发（预警 0.9s → 半径 210 爆发），必须走位躲避
+        novaSkill: {
+            interval: 6,
+            telegraph: 0.9,
+            radius: 210,
+            damageMultiplier: 2.2,
+        },
         isBoss: false,
         chestDropRate: 1, // 100% 掉宝箱（GDD 4.2.6）
         knockResistance: 0.6,

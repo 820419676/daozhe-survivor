@@ -21,6 +21,7 @@ import { PlayerData } from '../player/PlayerData';
 import { Enemy } from '../enemy/Enemy';
 import { EnemyType } from '../enemy/EnemyTypes';
 import { DashAbility } from '../player/DashAbility';
+import { LingmaiSystem } from '../progression/LingmaiSystem';
 import { WEAPON_CONFIGS, WeaponType } from '../combat/WeaponData';
 import { hexColor, makeLabel, makePanel } from '../core/UIUtils';
 import { PASSIVE_CONFIGS } from '../combat/PassiveData';
@@ -189,10 +190,10 @@ export class DebugPanel extends Component {
         }
     }
 
-    /** 灵脉状态文案（灵脉系统在阶段 2 接入，接入前显示 —） */
+    /** 灵脉状态文案（灵脉系统未挂载时显示 —） */
     private lingmaiText(): string {
-        const sys = (globalThis as Record<string, unknown>)['__lingmaiStatus'];
-        return typeof sys === 'string' && sys.length > 0 ? sys : '—';
+        const sys = LingmaiSystem.getInstance();
+        return sys ? sys.getStatusText() : '—';
     }
 
     private buildUI(): void {

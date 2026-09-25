@@ -192,7 +192,9 @@ export class EnemySpawner extends Component {
         for (let i = 0; i < count; i++) {
             this.spawnEnemy(ENEMY_CONFIGS[EnemyType.ELITE]);
         }
-        this.eliteTimer = this.eliteInterval; // 每 2 分钟一只
+        // 顶部横幅"妖王来袭"（Banner 订阅该事件）；精英自带火圈技能：可躲避的范围预警
+        EventBus.emit(GameEvent.ELITE_WARNING, { gameTime: this.gameTime });
+        this.eliteTimer = this.eliteInterval; // 默认每 45 秒一只（GAME_CONFIG.elite.interval）
     }
 
     // ==================== 天劫之主（Boss） ====================

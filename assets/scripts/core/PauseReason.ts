@@ -12,6 +12,8 @@ export enum PauseReason {
     WENXIN = 'wenxin',
     /** 升级三选一（完全冻结） */
     LEVEL_UP = 'level_up',
+    /** 奖励三选一（灵脉采集完成 / 开启宝箱；完全冻结） */
+    REWARD = 'reward',
     /** 手动暂停（设置/切后台等） */
     MANUAL = 'manual',
     /** 设置面板 */

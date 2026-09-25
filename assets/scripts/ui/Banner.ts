@@ -8,6 +8,8 @@
 // ============================================================
 
 import { _decorator, Component, Graphics, Label, Node, UIOpacity, UITransform, Vec3, view, tween, Tween } from 'cc';
+import { EventBus } from '../core/EventBus';
+import { GameEvent } from '../core/GameEvent';
 import { hexColor, makeLabel } from '../core/UIUtils';
 
 const { ccclass } = _decorator;
@@ -41,11 +43,41 @@ export class Banner extends Component {
     onLoad(): void {
         Banner._instance = this;
         this.buildUI();
+        // 统一订阅"事件 → 横幅文案"的映射，避免各系统各自拼 UI
+        const bus = EventBus.getInstance();
+        bus.on(GameEvent.ELITE_WARNING, this.onEliteWarning);
+        bus.on(GameEvent.LINGMAI_SPAWNED, this.onLingmaiSpawned);
+        bus.on(GameEvent.TALENT_GAINED, this.onTalentGained);
+        bus.on(GameEvent.WENXIN_OUTCOME, this.onWenxinOutcome);
     }
 
     onDestroy(): void {
+        const bus = EventBus.getInstance();
+        bus.off(GameEvent.ELITE_WARNING, this.onEliteWarning);
+        bus.off(GameEvent.LINGMAI_SPAWNED, this.onLingmaiSpawned);
+        bus.off(GameEvent.TALENT_GAINED, this.onTalentGained);
+        bus.off(GameEvent.WENXIN_OUTCOME, this.onWenxinOutcome);
         if (Banner._instance === this) Banner._instance = null;
     }
+
+    // —— 事件 → 横幅（箭头函数保证引用稳定，可安全退订） ——
+
+    private onEliteWarning = (): void => {
+        this.play('妖王来袭', '#FF6B6B', 1.8);
+    };
+
+    private onLingmaiSpawned = (): void => {
+        this.play('灵脉现世', '#60A5FA', 1.6);
+    };
+
+    private onTalentGained = (payload: { name?: string }): void => {
+        this.play(`流派天赋：${payload?.name ?? ''}`, '#FFD700', 2.0);
+    };
+
+    private onWenxinOutcome = (payload: { success?: boolean; text?: string }): void => {
+        const success = !!payload?.success;
+        this.play(payload?.text ?? (success ? '问心功成' : '问心未竟'), success ? '#FFD700' : '#F87171', 1.8);
+    };
 
     private play(text: string, colorHex: string, duration: number): void {
         const node = this.panel;

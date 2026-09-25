@@ -23,6 +23,9 @@ import { PickupSystem } from '../progression/PickupSystem';
 import { DebugPanel } from '../ui/DebugPanel';
 import { Banner } from '../ui/Banner';
 import { DashAbility } from '../player/DashAbility';
+import { LingmaiSystem } from '../progression/LingmaiSystem';
+import { ChestSystem } from '../progression/ChestSystem';
+import { RewardPanel } from '../progression/RewardPanel';
 
 const { ccclass } = _decorator;
 
@@ -132,10 +135,17 @@ export class GameEntry extends Component {
         spawnerComp.gameEndTime = testMode ? GameMode.TEST_2MIN : GameMode.TRIAL_15;
         spawnerComp.mapHalfWidth = 950;
         spawnerComp.mapHalfHeight = 950;
-        spawnerComp.eliteInterval = testMode ? 60 : 120;
+        // 精英妖王：每 45 秒一只，首次即第 45 秒（P1 验收节奏）
+        spawnerComp.eliteInterval = GAME_CONFIG.elite.interval;
 
         const pickups = this.ensureChild(canvas, 'Pickups');
         if (!pickups.getComponent(PickupSystem)) pickups.addComponent(PickupSystem);
+
+        // 地图资源点：灵脉（每 35 秒一座）与宝箱（精英掉落）
+        const lingmai = this.ensureChild(canvas, 'Lingmai');
+        if (!lingmai.getComponent(LingmaiSystem)) lingmai.addComponent(LingmaiSystem);
+        const chests = this.ensureChild(canvas, 'Chests');
+        if (!chests.getComponent(ChestSystem)) chests.addComponent(ChestSystem);
 
         // 每个弹层必须是 HUD 的独立兄弟节点；问心/升级/结算组件会各自隐藏自身节点。
         const uiRoot = this.ensureChild(canvas, 'UI');
@@ -148,6 +158,8 @@ export class GameEntry extends Component {
         this.ensureComponent(uiRoot, 'Banner', Banner);
         // 御风步（唯一主动技能：右下角按钮 + 冲刺位移/无敌/击退）
         this.ensureComponent(uiRoot, 'DashAbility', DashAbility);
+        // 通用三选一奖励面板（灵脉 / 宝箱共用；独立暂停原因，不与升级面板互相干扰）
+        this.ensureComponent(uiRoot, 'RewardPanel', RewardPanel);
         // 可玩状态调试面板（仅开发环境；GAME_CONFIG.debug.debugUi / DEBUG_UI 常量关闭）
         if (GAME_CONFIG.debug.debugUi) {
             this.ensureComponent(uiRoot, 'DebugPanel', DebugPanel);

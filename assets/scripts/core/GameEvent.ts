@@ -89,6 +89,10 @@ export enum GameEvent {
     LINGMAI_COLLECTED = 'lingmai_collected',
     /** 灵脉超时消失 */
     LINGMAI_EXPIRED = 'lingmai_expired',
+    /** 宝箱掉落（{ position, quality }，由 Enemy 的 DROP_CHEST 转出） */
+    CHEST_SPAWNED = 'chest_spawned',
+    /** 宝箱开启（{ reward }） */
+    CHEST_OPENED = 'chest_opened',
     /** 精英妖王来袭（{ node }，顶部横幅"妖王来袭"） */
     ELITE_WARNING = 'elite_warning',
     /** 获得流派天赋（{ talentId, name }，横幅"流派天赋：X"） */
