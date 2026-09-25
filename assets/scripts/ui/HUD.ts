@@ -291,6 +291,9 @@ export class HUD extends Component {
         if (this.courageLabel) this.courageLabel.string = '道心 0';
         if (this.streakLabel) this.streakLabel.string = '连渡 0';
         if (this.killsLabel) this.killsLabel.string = '击杀 0';
+        // 暂停态一并复位（防止上一局残留的遮罩/按钮文案带到新一局）
+        if (this.pauseOverlay) this.pauseOverlay.active = false;
+        if (this.pauseBtnLabel) this.pauseBtnLabel.string = '暂停';
         this.setXpProgress(0);
         this.refreshIcons();
     }

@@ -32,7 +32,7 @@ import { PlayerRegistry } from '../core/PlayerRegistry';
 import { Enemy } from '../enemy/Enemy';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../core/GameEvent';
-import { GameManager } from '../core/GameManager';
+import { GameManager, GameState } from '../core/GameManager';
 import { BuildSystem } from '../progression/BuildSystem';
 
 const { ccclass } = _decorator;
@@ -85,6 +85,22 @@ export class WeaponSystem extends Component {
         this._playerData = playerData;
     }
 
+    // ==================== 生命周期 ====================
+
+    onLoad(): void {
+        // 新一局：清空运行时武器与被动台账
+        // （被动台账不清会导致重开后被动效果不再重新应用）
+        EventBus.getInstance().on(GameEvent.GAME_START, this.onGameStart);
+    }
+
+    onDestroy(): void {
+        EventBus.getInstance().off(GameEvent.GAME_START, this.onGameStart);
+    }
+
+    private onGameStart = (): void => {
+        this.clearAll();
+    };
+
     // ==================== 帧更新 ====================
 
     protected update(dt: number): void {
@@ -94,6 +110,8 @@ export class WeaponSystem extends Component {
         // 问心减速（GDD 4.3.2）：武器冷却与发射走全局时间流速；
         // 完全暂停（升级/手动）时缩放后 dt = 0，冷却不再推进、不会误开火
         const gm = GameManager.getInstance();
+        // 结算界面背后不应继续开火（问心慢动作属于 PAUSED，需保留，故只拦 GAME_OVER）
+        if (gm && gm.state === GameState.GAME_OVER) return;
         const sdt = gm ? gm.getScaledDt(dt) : dt;
 
         // 遍历所有武器：推进冷却，归零则开火

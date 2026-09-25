@@ -209,6 +209,7 @@ export class PlayerController extends Component {
         EventBus.off(GameEvent.PLAYER_DAMAGED, this.onPlayerDamaged, this);
         EventBus.off(GameEvent.PLAYER_HP_CHANGED, this.onPlayerHpChanged, this);
         EventBus.off(GameEvent.ENEMY_ATTACK, this.onEnemyAttack, this);
+        EventBus.off(GameEvent.GAME_START, this.onGameStart, this);
         this.unscheduleAllCallbacks();
     }
 
@@ -514,7 +515,40 @@ export class PlayerController extends Component {
         EventBus.on(GameEvent.PLAYER_DAMAGED, this.onPlayerDamaged, this);
         EventBus.on(GameEvent.PLAYER_HP_CHANGED, this.onPlayerHpChanged, this);
         EventBus.on(GameEvent.ENEMY_ATTACK, this.onEnemyAttack, this);
+        EventBus.on(GameEvent.GAME_START, this.onGameStart, this);
     }
+
+    /**
+     * 新一局复位（GAME_START）。
+     * 关键：必须清掉 isDead 与无敌/冲刺状态 —— 否则死后重开角色永远不动
+     * （update 首行即 return），表现就是"再来一局没有重新开始"。
+     */
+    private onGameStart = (): void => {
+        this.isDead = false;
+        this.invincibleTimer = 0;
+        this.dashInvincible = false;
+        this.dashing = false;
+        this.touchPos = null;
+        this.regenTimer = 0;
+        this.orbCount = 0;
+        this.facing = v3(1, 0, 0);
+
+        // 玩家数据就地复位（武器/被动槽位清空 → WeaponSystem 下一帧移除运行时武器）
+        this.data.reset();
+        PlayerRegistry.bind(this.data);
+
+        // 回到场地中心
+        this.node.setPosition(0, 0, this.node.position.z);
+
+        // 立即清空武器运行时状态（环绕剑阵/光环节点），不等 reconcile
+        const weapons = this.node.getComponent(WeaponSystem);
+        if (weapons) {
+            weapons.clearAll();
+            weapons.facing = 0;
+        }
+
+        this.refreshHpBar();
+    };
 
     /** 敌人攻击命中（接触 / 弹幕）→ 统一走 takeDamage（含无敌帧） */
     private onEnemyAttack = (payload: { damage: number; kind?: string }): void => {

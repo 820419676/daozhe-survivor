@@ -161,6 +161,13 @@ export class Enemy extends Component {
         return now < Enemy.speedBuffUntil ? Enemy.speedBuffMultiplier : 1;
     }
 
+    /** 复位全局静态状态（新一局：清除残影诱饵与移速增益） */
+    public static resetGlobalState(): void {
+        Enemy.decoy = null;
+        Enemy.speedBuffMultiplier = 1;
+        Enemy.speedBuffUntil = 0;
+    }
+
     /** 施加减速（取更强的一次，不叠加） */
     public applySlow(seconds: number, factor: number): void {
         if (this.recycled || this.dying) return;

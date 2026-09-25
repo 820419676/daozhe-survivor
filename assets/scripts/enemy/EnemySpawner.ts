@@ -113,8 +113,31 @@ export class EnemySpawner extends Component {
     onLoad(): void {
         EventBus.on(GameEvent.PLAYER_DIED, this.onPlayerDied, this);
         EventBus.on(GameEvent.ELITE_SUMMON, this.onEliteSummon, this);
+        EventBus.on(GameEvent.GAME_START, this.onGameStart, this);
         this.spawnTimer = 0.5;      // 开局 0.5s 后开始刷怪
         // eliteTimer 在 updateElite 首次运行时惰性初始化（见 eliteTimerInit）
+    }
+
+    /**
+     * 新一局复位：清场 + 所有计时归零。
+     * 必须复位 gameTime，否则波次权重/精英/Boss 计时会沿用上一局（第 2 局直接从
+     * "第 N 分钟"的密度开始，手感与首局完全不同）。
+     */
+    private onGameStart(): void {
+        this.clearAll();              // 场上敌人全部回对象池
+        Enemy.resetGlobalState();     // 残影诱饵 / 全局移速增益
+        this.gameTime = 0;
+        this.spawnTimer = 0.5;
+        this.eliteTimerInit = false;  // 按当前 eliteInterval 重新惰性初始化
+        this.eliteTimer = this.eliteInterval;
+        this.bossSpawned = false;
+        this.bossActive = false;
+        this.waveMinute = -1;
+        this.perfTier = 0;
+        this.fpsSum = 0;
+        this.fpsCount = 0;
+        this.fpsWindow = 0;
+        this.fpsHighTimer = 0;
     }
 
     /** 立刻降临一只精英妖王（问心天问失败时由 Rewards 广播请求） */
@@ -143,6 +166,7 @@ export class EnemySpawner extends Component {
     onDestroy(): void {
         EventBus.off(GameEvent.PLAYER_DIED, this.onPlayerDied, this);
         EventBus.off(GameEvent.ELITE_SUMMON, this.onEliteSummon, this);
+        EventBus.off(GameEvent.GAME_START, this.onGameStart, this);
         this.enemyPool.clear();
     }
 

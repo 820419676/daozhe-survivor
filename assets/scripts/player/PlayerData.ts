@@ -192,4 +192,36 @@ export class PlayerData {
     heal(amount: number): void {
         this.hp = Math.min(this.maxHp, this.hp + amount);
     }
+
+    /**
+     * 新一局复位（GameManager 广播 GAME_START 时由 PlayerController 调用）。
+     * 就地复位而不是新建对象：PlayerRegistry / XPSystem / WeaponSystem 都持有
+     * 本实例的引用，换对象会导致它们读到旧数据。
+     * 数值与上方字段默认值保持一致（同一文件内，便于核对）。
+     */
+    reset(): void {
+        // 基础属性
+        this.hp = 100;
+        this.maxHp = 100;
+        this.level = 1;
+        this.xp = 0;
+        this.kills = 0;
+        this.gold = 0;
+        // 战斗属性
+        this.might = 1;
+        this.area = 1;
+        this.speed = 1;
+        this.duration = 1;
+        this.cooldown = 1;
+        this.luck = 1;
+        this.greed = 1;
+        this.bravery = 0;
+        // 装备（武器/被动槽位清空）
+        this.weapons.length = 0;
+        this.passives.length = 0;
+        // 问心状态
+        this.xpMultiplier = 1;
+        this.currentWenxinTier = 0;
+        this.consecutiveWins = 0;
+    }
 }

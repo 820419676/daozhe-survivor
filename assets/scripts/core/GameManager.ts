@@ -52,6 +52,11 @@ export enum GameMode {
 /** 问心减速时间流速（GDD 4.3.2：画面减速至 20%，不暂停割草） */
 export const WENXIN_TIMESCALE = 0.2;
 
+/** 默认开局模式：开发环境用 3 分钟测试模式，正式版 15 分钟试炼 */
+export function defaultGameMode(): GameMode {
+    return GAME_CONFIG.debug.test2Minute ? GameMode.TEST_DEV : GameMode.TRIAL_15;
+}
+
 @ccclass('GameManager')
 export class GameManager extends Component {
     /** 全局单例 */
@@ -128,9 +133,7 @@ export class GameManager extends Component {
 
         // 默认直接开局：开发环境 3 分钟测试模式（GAME_CONFIG.debug.test2Minute），
         // 正式版置 false 后恢复 15 分钟试炼
-        this.startGame(
-            GAME_CONFIG.debug.test2Minute ? GameMode.TEST_DEV : GameMode.TRIAL_15
-        );
+        this.startGame();
     }
 
     onDestroy() {
@@ -145,10 +148,12 @@ export class GameManager extends Component {
     }
 
     /**
-     * 开始一局游戏（重置全部局内状态）
-     * @param mode 游戏模式，默认15分钟试炼
+     * 开始一局游戏（重置全部局内状态）。
+     * @param mode 游戏模式，默认 = 当前环境的默认模式（开发环境为 3 分钟测试模式）。
+     *             注意不能让默认值写死成 TRIAL_15，否则"再来一局"会把开发模式
+     *             悄悄换成 15 分钟试炼。
      */
-    startGame(mode: GameMode = GameMode.TRIAL_15) {
+    startGame(mode: GameMode = defaultGameMode()) {
         this.mode = mode;
         this.elapsedTime = 0;
         this.lastTickSecond = 0;

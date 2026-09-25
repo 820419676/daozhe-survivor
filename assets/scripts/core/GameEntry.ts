@@ -6,6 +6,7 @@ import {
     Label, Node, Size, UITransform, view, log, warn, UIOpacity, tween,
 } from 'cc';
 import { EventBus } from './EventBus';
+import { GameEvent } from './GameEvent';
 import { GameManager, GameMode } from './GameManager';
 import { GAME_CONFIG } from './GameConfig';
 import { WenxinManager } from '../wenxin/WenxinManager';
@@ -53,8 +54,20 @@ export class GameEntry extends Component {
         EventBus.emit('GAME_ENTRY_READY');
         // PlayerController 的 onLoad 已完成，下一帧赠送首把武器，确保开局立即有战斗反馈。
         this.scheduleOnce(() => this.addStarterWeapon(), 0);
+        // 新一局同样要发初始武器：复位会把武器槽清空，否则重开后
+        // 玩家没有武器 → 打不死敌人 → 永远升不了级（死局）。
+        EventBus.getInstance().on(GameEvent.GAME_START, this.onGameStart);
         log('[GameEntry] Startup complete.');
     }
+
+    onDestroy(): void {
+        EventBus.getInstance().off(GameEvent.GAME_START, this.onGameStart);
+    }
+
+    private onGameStart = (): void => {
+        // 延后一帧：确保各系统的 GAME_START 复位（含清空武器槽）已经执行完
+        this.scheduleOnce(() => this.addStarterWeapon(), 0);
+    };
 
     private bootstrapMvpScene(): void {
         const canvas = this.node.name === 'Canvas' ? this.node : (this.node.parent ?? find('Canvas'));

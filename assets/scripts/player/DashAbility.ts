@@ -72,12 +72,23 @@ export class DashAbility extends Component {
 
     onLoad(): void {
         DashAbility._instance = this;
+        EventBus.getInstance().on(GameEvent.GAME_START, this.onGameStart);
         this.buildButton();
     }
 
     onDestroy(): void {
+        EventBus.getInstance().off(GameEvent.GAME_START, this.onGameStart);
         if (DashAbility._instance === this) DashAbility._instance = null;
     }
+
+    /** 新一局：冷却归零、冲刺状态与增伤标记清除 */
+    private onGameStart = (): void => {
+        this.cooldown = 0;
+        this.dashTimer = 0;
+        this.doubleDamageNextDash = false;
+        this.hitEnemies.clear();
+        this.passedCount = 0;
+    };
 
     // ==================== 查询接口（DebugPanel 用） ====================
 
