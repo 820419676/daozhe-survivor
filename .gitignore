@@ -19,3 +19,7 @@ node_modules/
 # 重新导入前的备份目录（Cocos 生成，体积大）
 *.pre-reimport-backup-*/
 
+# Python 缓存（fix_scene*.py 等本地脚本产生）
+__pycache__/
+*.pyc
+
