@@ -263,9 +263,7 @@ export class Projectile extends Component {
 
     /** 直线飞行：移动 + 命中 + 射程/时限销毁 */
     private updateLinear(sdt: number): void {
-        this._pos.add(this._dir.x * this._p.speed * sdt, this._dir.y * this._p.speed * sdt, 0);
-        this.node.setWorldPosition(this._pos);
-        this._traveled += this._p.speed * sdt;
+        this.stepForward(sdt);
         this.hitCheck();
         if (
             (this._p.maxDistance !== undefined && this._traveled >= this._p.maxDistance) ||
@@ -278,9 +276,7 @@ export class Projectile extends Component {
     /** 追踪飞行：平滑转向目标，命中/超时销毁 */
     private updateTracking(sdt: number): void {
         this.steer(sdt);
-        this._pos.add(this._dir.x * this._p.speed * sdt, this._dir.y * this._p.speed * sdt, 0);
-        this.node.setWorldPosition(this._pos);
-        this._traveled += this._p.speed * sdt;
+        this.stepForward(sdt);
         this.hitCheck();
         if (
             (this._p.maxDistance !== undefined && this._traveled >= this._p.maxDistance) ||
@@ -288,6 +284,22 @@ export class Projectile extends Component {
         ) {
             this.die();
         }
+    }
+
+    /**
+     * 沿当前方向前进一帧（直线 / 追踪共用）。
+     *
+     * 注意：Cocos 3.8 的 Vec3 分量式加法是 `add3f(x, y, z)`，
+     * `add()` 只接受一个 Vec3 —— 写成 `pos.add(dx, dy, 0)` 会把数字当向量读，
+     * 结果坐标变 NaN，弹幕既不渲染也不命中（飞剑术/寒冰掌曾因此完全不可见）。
+     * 这里直接用分量累加，语义明确且不依赖引擎重载。
+     */
+    private stepForward(sdt: number): void {
+        const step = this._p.speed * sdt;
+        this._pos.x += this._dir.x * step;
+        this._pos.y += this._dir.y * step;
+        this._traveled += step;
+        this.node.setWorldPosition(this._pos);
     }
 
     /** 环绕飞行：以玩家为圆心圆周运动，转满一圈重置命中表（可反复切割） */

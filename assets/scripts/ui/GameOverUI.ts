@@ -241,7 +241,17 @@ export class GameOverUI extends Component {
         const canPause = !!gm && (gm.state === GameState.PLAYING || gm.state === GameState.PAUSED);
         if (canPause) gm!.requestPause(PauseReason.AD);
 
-        WxManager.getInstance().showRewardedAd(AD_REVIVE_ID).then((ok) => {
+        const wx = WxManager.getInstance();
+        if (!wx) {
+            // 平台管理器未挂载：安全降级，避免 null 调用异常卡死结算界面
+            if (canPause) gm!.requestResume(PauseReason.AD);
+            this.busy = false;
+            this.setBusyText(this.reviveBtnLabel, '复活');
+            this.showToast('广告服务不可用');
+            return;
+        }
+
+        wx.showRewardedAd(AD_REVIVE_ID).then((ok) => {
             if (canPause) gm!.requestResume(PauseReason.AD);
             this.busy = false;
             this.setBusyText(this.reviveBtnLabel, '复活');
@@ -272,7 +282,17 @@ export class GameOverUI extends Component {
         const gm = GameManager.getInstance();
         if (gm) gm.requestPause(PauseReason.AD);
 
-        WxManager.getInstance().showRewardedAd(AD_DOUBLE_REWARD_ID).then((ok) => {
+        const wx = WxManager.getInstance();
+        if (!wx) {
+            // 平台管理器未挂载：安全降级（同上）
+            if (gm) gm.requestResume(PauseReason.AD);
+            this.busy = false;
+            this.setBusyText(this.doubleBtnLabel, '结算翻倍');
+            this.showToast('广告服务不可用');
+            return;
+        }
+
+        wx.showRewardedAd(AD_DOUBLE_REWARD_ID).then((ok) => {
             if (gm) gm.requestResume(PauseReason.AD);
             this.busy = false;
             this.setBusyText(this.doubleBtnLabel, '结算翻倍');

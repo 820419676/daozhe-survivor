@@ -249,7 +249,8 @@ export class WenxinUI extends Component {
         const slip = this.slipLabel.node;
         slip.active = true;
         this.slipLabel.string = `${'★'.repeat(display.starCount)}  ${display.slogan}`;
-        slip.color = hexColor(display.color);
+        // 颜色属于 Label 组件（Node 上没有 color 属性，赋给节点不会生效）
+        this.slipLabel.color = hexColor(display.color);
 
         const startPos = this.divinationTube
             ? this.divinationTube.position.clone()

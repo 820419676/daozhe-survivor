@@ -9,6 +9,7 @@ import { EventBus } from './EventBus';
 import { GameManager, GameMode } from './GameManager';
 import { GAME_CONFIG } from './GameConfig';
 import { WenxinManager } from '../wenxin/WenxinManager';
+import { WxManager } from '../platform/WxManager';
 import { PlayerController } from '../player/PlayerController';
 import { WeaponSystem } from '../combat/WeaponSystem';
 import { EnemySpawner } from '../enemy/EnemySpawner';
@@ -79,6 +80,9 @@ export class GameEntry extends Component {
         const gameRoot = this.node.name === 'Canvas' ? this.ensureChild(canvas, 'GameRoot') : this.node;
         if (!gameRoot.getComponent(GameManager)) gameRoot.addComponent(GameManager);
         if (!gameRoot.getComponent(WenxinManager)) gameRoot.addComponent(WenxinManager);
+        // 平台管理器：结算界面的复活/翻倍按钮依赖它（缺失会空指针）；
+        // 非微信环境内部自动降级为本地模拟（showRewardedAd 直接 resolve(true)）
+        if (!gameRoot.getComponent(WxManager)) gameRoot.addComponent(WxManager);
 
         const map = this.ensureChild(canvas, 'Map');
         if (!map.getComponent(UITransform)) map.addComponent(UITransform).setContentSize(2000, 2000);
